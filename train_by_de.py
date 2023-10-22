@@ -7,7 +7,7 @@ from block_differential_evolution import block_differential_evolution
 
 from model import NeuralNetwork
 from data_loader import *
-from base import GradientFreeOptimization
+from gfo import GradientFreeOptimization
 
 
 def optimal_block_generator(dimensions, blocked_dimensions,
@@ -63,6 +63,7 @@ def main(args):
         initial_population = gfo.population_initializer(popsize, seed=seed_pop)
         print(gfo.fitness_func(initial_population[-1]))
         dimensions = initial_population.shape[1]
+        print("Number of parameters:", dimensions)
 
         bounds = np.concatenate([initial_population.min(axis=0).reshape(-1, 1), initial_population.max(axis=0).reshape(-1,1)], axis=1)
         mutation_rate = []
@@ -101,11 +102,13 @@ def main(args):
         save_link = f'{args.output_dir}ann_{algorithm}_np{popsize}_{args.strategy}{file_mid}maxFE{max_iterations*popsize}_mnist_training_history_{i}'
         plot_link = f'{args.output_dir}ann_{algorithm}_np{popsize}_{args.strategy}{file_mid}maxFE{max_iterations*popsize}_mnist_training_plot_{i}.png'
         print(save_link)
+        if os.path.exists(save_link+'.npz'):
+            continue
         res = block_differential_evolution(gfo.fitness_func, bounds, 
                                                 mutation=mutation_rate, maxiter=max_iterations, block_size=block_size,
                                                 save_link=save_link, plot_link=plot_link, blocks_link=blocks_data,
-                                                popsize=popsize, callback=None, polish=False, disp=True, updating='deferred',
-                                                strategy=args.strategy, init=initial_population)
+                                                popsize=popsize, callback=None, polish=False, local_search=args.local_search,
+                                                disp=True, updating='deferred', strategy=args.strategy, init=initial_population)
 
 if __name__ == '__main__':
     # --------------------------------------------------
@@ -128,6 +131,7 @@ if __name__ == '__main__':
     # algorithm
     parser.add_argument('--algorithm', type=str, default='de', help='Optimization methods')
     parser.add_argument('--block-size', type=int, default=0, help='A hyper-paramater in BDE')
+    parser.add_argument('--local-search', type=bool, default=False, help='Coordiante Descent enable')
     parser.add_argument('--cuda', type=bool, default=True, help='Whether to use cuda')
     parser.add_argument('--strategy', type=str, default="rand1bin", help="Mutation and Crossover strategy")
     parser.add_argument('--mut-rate', type=str, default="const", help="Mutation and Crossover strategy")

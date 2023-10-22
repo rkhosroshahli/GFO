@@ -38,7 +38,7 @@ import matplotlib.pyplot as plt
 def block_differential_evolution(func, bounds, args=(), strategy='rand1bin',
                            maxiter=30000, popsize=100, tol=0,
                            mutation=0.5, recombination=0.9, seed=None,
-                           callback=None, disp=True, polish=False,
+                           callback=None, disp=True, polish=False, local_search=False,
                            init='random', atol=0, updating='deferred',
                            workers=1, constraints=(), x0=None, *,
                            integrality=None, vectorized=False,
@@ -53,6 +53,7 @@ def block_differential_evolution(func, bounds, args=(), strategy='rand1bin',
                                      mutation=mutation,
                                      recombination=recombination,
                                      seed=seed, polish=polish,
+                                     local_search=local_search,
                                      callback=callback,
                                      disp=disp, init=init, atol=atol,
                                      updating=updating,
@@ -94,7 +95,7 @@ class DifferentialEvolutionSolver:
     def __init__(self, func, bounds, args=(),
                  strategy='rand1bin', maxiter=1000, popsize=100,
                  tol=0, mutation=0.5, recombination=0.9, seed=None,
-                 maxfun=np.inf, callback=None, disp=False, polish=False,
+                 maxfun=None, callback=None, disp=False, polish=False, local_search=False,
                  init='random', atol=0, updating='deferred',
                  workers=1, constraints=(), x0=None, *,
                  integrality=None, vectorized=False, block_size=10, save_link=None, plot_link=None, blocks_link=None):
@@ -109,6 +110,7 @@ class DifferentialEvolutionSolver:
 
         self.callback = callback
         self.polish = polish
+        self.local_search = local_search
 
         # set the updating / parallelisation options
         if updating in ['immediate', 'deferred']:
@@ -190,9 +192,9 @@ class DifferentialEvolutionSolver:
             maxiter = 1000
         self.maxiter = maxiter
         if maxfun is None:  # the default used to be None
-            maxfun = np.inf
+            maxfun = (maxiter) * (popsize)
         self.maxfun = maxfun
-
+        self.nit_cd = 10
         # population is scaled to between [0, 1].
         # We have to scale between parameter <-> population
         # save these arguments for _scale_parameter and
@@ -300,7 +302,8 @@ class DifferentialEvolutionSolver:
         self.disp = disp
         self.save_link = save_link
         self.plot_link = plot_link
-        self.best_sol_generations_fit=[]
+        self.best_sol_generations_fit = []
+        self.local_search_fitness_history = []
 
     def init_population_lhs(self):
         """
@@ -484,14 +487,19 @@ class DifferentialEvolutionSolver:
         # that someone can set maxiter=0, at which point we still want the
         # initial energies to be calculated (the following loop isn't run).
         # do the optimization.
-        for nit in range(1, self.maxiter):
+        maxdeiter = self.maxiter
+        if self.local_search:
+            maxdeiter = ((self.maxfun - (self.nit_cd * (self.blocked_dimensions) * 2))//self.num_population_members)+1
+        
+        print("Max DE iterations:", maxdeiter)
+
+        for nit in range(1, maxdeiter):
             # evolve the population by a generation
             try:
                 next(self)
-                print("best f: ", self.population_energies.min())
                 self.best_sol_generations_fit.append(self.population_energies.min())
-                self.plot_fitness_save()
                 if nit % 50 == 1:
+                    self.plot_fitness_save()
                     np.savez(self.save_link, best_solution=self.population[self.population_energies.argmin()], fitness_history=self.best_sol_generations_fit)
             except StopIteration:
                 warning_flag = True
@@ -500,10 +508,9 @@ class DifferentialEvolutionSolver:
                 elif self._nfev == self.maxfun:
                     status_message = ('Maximum number of function evaluations'
                                       ' has been reached.')
-                self.best_sol_generations_fit.append(self.population_energies.min())
                 break
 
-            if self.disp:
+            if self.disp and nit % 50 == 1:
                 print("differential_evolution step %d: f(x)= %.2f"
                       % (nit,
                          self.population_energies.min()*-100))
@@ -514,8 +521,6 @@ class DifferentialEvolutionSolver:
                 if warning_flag:
                     status_message = ('callback function requested stop early'
                                       ' by returning True')"""
-        self.plot_fitness_save()
-        np.savez(self.save_link, best_solution=self.population[self.population_energies.argmin()], fitness_history=self.best_sol_generations_fit)
         
         DE_result = OptimizeResult(
             x=self.population[self.population_energies.argmin()],
@@ -524,6 +529,63 @@ class DifferentialEvolutionSolver:
             nit=nit,
             message=status_message,
             success=(warning_flag is not True))
+        
+        if self.local_search:
+            best_solution = self.population_blocked[self.population_energies.argmin()]
+            best_fitness = DE_result.fun
+            var_max = np.max(self.population_blocked, axis=0)
+            var_min = np.min(self.population_blocked, axis=0)
+            for i in range(self.nit_cd):
+                if self._nfev == self.maxfun:
+                    status_message = ('Maximum number of function evaluations'
+                                      ' has been reached.')
+                    break
+                for d in range(self.blocked_dimensions):
+                    l_d = var_max[d] - var_min[d]
+                    c1 = best_solution.copy()
+                    c2 = best_solution.copy()
+                    c1[d] = var_min[d] + l_d/4
+                    c2[d] = var_max[d] - l_d/4
+                    c1_f, c2_f = self._calculate_population_energies(self._unblocker_random(np.array([c1, c2])))
+                    
+                    if c1_f < c2_f < best_fitness:
+                        best_solution = c1.copy()
+                        best_fitness = c1_f
+                        var_max[d] -= l_d/2
+                    elif c2_f < c1_f < best_fitness:
+                        best_solution = c2.copy()
+                        best_fitness = c2_f
+                        var_min[d] += l_d/2
+                    else:
+                        var_min[d] += l_d/4
+                        var_max[d] -= l_d/4
+
+                if self.disp:
+                    print("local search CD step %d: f(x)= %.2f"
+                            % (i, best_fitness*-100))      
+                
+                self.local_search_fitness_history.append(best_fitness)
+                self.plot_fitness_save()
+                np.savez(self.save_link,
+                            best_solution=self.population[self.population_energies.argmin()],
+                            fitness_history=self.best_sol_generations_fit,
+                            local_search_fitness_history=self.local_search_fitness_history)
+
+            DE_result.nfev = self._nfev   
+            DE_result.fun = best_fitness
+            DE_result.x = self._unblocker_random(np.array([best_solution]))[0]
+            DE_result.message = status_message
+            # to keep internal state consistent
+            self.population_energies[0] = best_fitness
+            self.population[0] = DE_result.x
+
+            self.local_search_fitness_history.append(best_fitness)
+            self.plot_fitness_save()
+            np.savez(self.save_link,
+                            best_solution=self.population[self.population_energies.argmin()],
+                            fitness_history=self.best_sol_generations_fit,
+                            local_search_fitness_history=self.local_search_fitness_history)
+            
 
         if self.polish and not np.all(self.integrality):
             # can't polish if all the parameters are integers
@@ -581,6 +643,9 @@ class DifferentialEvolutionSolver:
                 DE_result.message = ("The solution does not satisfy the "
                                      f"constraints, MAXCV = {DE_result.maxcv}")
 
+        self.plot_fitness_save()
+        np.savez(self.save_link, best_solution=self.population[self.population_energies.argmin()], fitness_history=self.best_sol_generations_fit, )
+        
         return DE_result
 
     def _calculate_population_energies(self, population):
@@ -871,16 +936,10 @@ class DifferentialEvolutionSolver:
                 #     self.population_energies = (self._calculate_population_energies(temp_pop))
             else:
                 self.population_energies = (self._calculate_population_energies(self.population))
-            
-
-            
-
-
 
             print("best f: ", self.population_energies.min())
             self.best_sol_generations_fit.append(self.population_energies.min())
-            self.plot_fitness_save()
-            
+            # self.plot_fitness_save()
             
             #self._promote_lowest_energy()
 
@@ -1137,6 +1196,8 @@ class DifferentialEvolutionSolver:
     
     def plot_fitness_save(self):
         fitness_history = np.asarray(self.best_sol_generations_fit) * -100
+        if self.local_search:
+            fitness_history = np.concatenate([self.best_sol_generations_fit, self.local_search_fitness_history]) * -100
         plt.figure(figsize=(12, 5))
         plt.plot(fitness_history, label='F1-score')
         plt.xlabel('Iterations')
