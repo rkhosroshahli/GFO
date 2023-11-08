@@ -42,7 +42,7 @@ def block_differential_evolution(func, bounds, args=(), strategy='rand1bin',
                            init='random', atol=0, updating='deferred',
                            workers=1, constraints=(), x0=None, *,
                            integrality=None, vectorized=False,
-                             block_size=10, save_link=None, plot_link=None, blocks_link=None):
+                             block_size=None, blocked_dimensions=None, save_link=None, plot_link=None, blocks_link=None):
 
     # using a context manager means that any created Pool objects are
     # cleared up.
@@ -63,6 +63,7 @@ def block_differential_evolution(func, bounds, args=(), strategy='rand1bin',
                                      integrality=integrality,
                                      vectorized=vectorized,
                                      block_size=block_size,
+                                     blocked_dimensions=blocked_dimensions,
                                      save_link=save_link,
                                      plot_link=plot_link,
                                     blocks_link=blocks_link) as solver:
@@ -98,7 +99,8 @@ class DifferentialEvolutionSolver:
                  maxfun=None, callback=None, disp=False, polish=False, local_search=False,
                  init='random', atol=0, updating='deferred',
                  workers=1, constraints=(), x0=None, *,
-                 integrality=None, vectorized=False, block_size=10, save_link=None, plot_link=None, blocks_link=None):
+                 integrality=None, vectorized=False, block_size=None, blocked_dimensions=None, true_dimensions=None,
+                 save_link=None, plot_link=None, blocks_link=None):
 
         if strategy in self._binomial:
             self.mutation_func = getattr(self, self._binomial[strategy])
@@ -244,17 +246,26 @@ class DifferentialEvolutionSolver:
                                  self.parameter_count)
         
         self.block_size = block_size
-        if block_size != 0:
-            self.blocked_dimensions = self.parameter_count//self.block_size
-            if self.parameter_count//self.block_size % 10 != 0:
-                self.blocked_dimensions +=1
+        self.blocked_dimensions = blocked_dimensions
+        
+        if block_size != None:
+            
+            if blocked_dimensions == None:
+                self.blocked_dimensions = self.parameter_count//self.block_size
+                if self.parameter_count//self.block_size % 10 != 0:
+                    self.blocked_dimensions +=1
             
             if blocks_link == None:
                 mask1 = np.ones((self.num_population_members, self.parameter_count), dtype=bool)
                 mask2 = np.zeros((self.num_population_members, self.block_size - (self.parameter_count % self.block_size)), dtype=bool)
                 self.blocks_mask = np.concatenate([mask1, mask2], axis=1)
-            else:
+            elif block_size > 0:
                 self.blocks_mask = np.load(blocks_link+'.npy')
+            else:
+                import pickle
+                with open(blocks_link, 'rb') as f:
+                    self.blocks_mask = pickle.load(f)
+                
         
         
         self._nfev = 0
@@ -302,8 +313,8 @@ class DifferentialEvolutionSolver:
         self.disp = disp
         self.save_link = save_link
         self.plot_link = plot_link
-        self.best_sol_generations_fit = []
-        self.local_search_fitness_history = []
+        self.best_gens_fitness_history = [] # Best DE steps fitness saves here
+        self.local_search_fitness_history = [] # Best local search steps saves here
 
     def init_population_lhs(self):
         """
@@ -410,23 +421,26 @@ class DifferentialEvolutionSolver:
         # make sure you're using a float array
         popn = np.asfarray(init)
 
-        if (np.size(popn, 0) < 5 or
-                popn.shape[1] != self.parameter_count or
-                len(popn.shape) != 2):
+        if (np.size(popn, 0) < 5 or len(popn.shape) != 2):
             raise ValueError("The population supplied needs to have shape"
                              " (S, len(x)), where S > 4.")
 
         # scale values and clip to bounds, assigning to population
         self.population = popn
 
+        if np.size(popn, 1) == self.blocked_dimensions:
+            self.population_blocked = popn
+            self.population = self._unblocker_optimal(popn)
+        elif self.block_size != None:
+            # self.population_blocked = self._blocker_random(self.population)
+            # self.population_blocked = self._blocker_random_average(self.population)
+            self.population_blocked = self._blocker_optimal(self.population)
+
         self.num_population_members = np.size(self.population, 0)
 
         self.population_shape = (self.num_population_members,
                                  self.parameter_count)
         
-        if self.block_size != 0:
-            self.population_blocked = self._blocker_random(self.population)
-            
         # reset population energies
         self.population_energies = np.full(self.num_population_members,
                                            np.inf)
@@ -497,10 +511,10 @@ class DifferentialEvolutionSolver:
             # evolve the population by a generation
             try:
                 next(self)
-                self.best_sol_generations_fit.append(self.population_energies.min())
-                if nit % 50 == 1:
+                self.best_gens_fitness_history.append(self.population_energies.min())
+                if nit % 10 == 1:
                     self.plot_fitness_save()
-                    np.savez(self.save_link, best_solution=self.population[self.population_energies.argmin()], fitness_history=self.best_sol_generations_fit)
+                    np.savez(self.save_link, best_solution=self.population[self.population_energies.argmin()], fitness_history=self.best_gens_fitness_history)
             except StopIteration:
                 warning_flag = True
                 if self._nfev > self.maxfun:
@@ -510,7 +524,7 @@ class DifferentialEvolutionSolver:
                                       ' has been reached.')
                 break
 
-            if self.disp and nit % 50 == 1:
+            if self.disp and nit % 10 == 1:
                 print("differential_evolution step %d: f(x)= %.2f"
                       % (nit,
                          self.population_energies.min()*-100))
@@ -546,7 +560,8 @@ class DifferentialEvolutionSolver:
                     c2 = best_solution.copy()
                     c1[d] = var_min[d] + l_d/4
                     c2[d] = var_max[d] - l_d/4
-                    c1_f, c2_f = self._calculate_population_energies(self._unblocker_random(np.array([c1, c2])))
+                    # c1_f, c2_f = self._calculate_population_energies(self._unblocker_random(np.array([c1, c2])))
+                    self.population_blocked = self._blocker_optimal(self.population)
                     
                     if c1_f < c2_f < best_fitness:
                         best_solution = c1.copy()
@@ -568,12 +583,13 @@ class DifferentialEvolutionSolver:
                 self.plot_fitness_save()
                 np.savez(self.save_link,
                             best_solution=self.population[self.population_energies.argmin()],
-                            fitness_history=self.best_sol_generations_fit,
+                            fitness_history=self.best_gens_fitness_history,
                             local_search_fitness_history=self.local_search_fitness_history)
 
             DE_result.nfev = self._nfev   
             DE_result.fun = best_fitness
-            DE_result.x = self._unblocker_random(np.array([best_solution]))[0]
+            # 
+            DE_result.x = self._unblocker_optimal(np.array([best_solution]))[0]
             DE_result.message = status_message
             # to keep internal state consistent
             self.population_energies[0] = best_fitness
@@ -583,7 +599,7 @@ class DifferentialEvolutionSolver:
             self.plot_fitness_save()
             np.savez(self.save_link,
                             best_solution=self.population[self.population_energies.argmin()],
-                            fitness_history=self.best_sol_generations_fit,
+                            fitness_history=self.best_gens_fitness_history,
                             local_search_fitness_history=self.local_search_fitness_history)
             
 
@@ -644,7 +660,7 @@ class DifferentialEvolutionSolver:
                                      f"constraints, MAXCV = {DE_result.maxcv}")
 
         self.plot_fitness_save()
-        np.savez(self.save_link, best_solution=self.population[self.population_energies.argmin()], fitness_history=self.best_sol_generations_fit, )
+        np.savez(self.save_link, best_solution=self.population[self.population_energies.argmin()], fitness_history=self.best_gens_fitness_history, )
         
         return DE_result
 
@@ -898,47 +914,15 @@ class DifferentialEvolutionSolver:
 
             # only need to work out population energies for those that are
             # feasible
-            if self.block_size > 0 :
-                temp_pop = self._unblocker_random(self.population_blocked)
+            if self.block_size != None:
+                # temp_pop = self._unblocker_random(self.population_blocked)
+                temp_pop = self._unblocker_optimal(self.population_blocked)
                 self.population_energies = (self._calculate_population_energies(temp_pop))
-
-                # best_solution = self.population[self.population_energies.argmax()].copy()
-                # best_solution_f = self._calculate_population_energies([best_solution])[0]
-                # best_blocked_solution_f = self.population_energies.max()
-                # block_changed = False
-                # while True:
-                #     if  best_blocked_solution_f < best_solution_f:
-                #         print("Better", best_blocked_solution_f - best_solution_f)
-                #         break
-                #     else:
-                #         print("Worse", best_blocked_solution_f - best_solution_f)
-                #         np.random.shuffle(self.blocks_mask)
-                #         print(self.blocks_mask[0])
-                #         """blocks = np.arange(dimensions + ((block_size-(dimensions%block_size))))
-                #         rng.shuffle(blocks)
-                #         blocks = blocks.reshape((blocked_dimensions, block_size))"""
-                #         while np.sum(self.parameter_count > self.blocks_mask[:, 0]) != self.blocked_dimensions:
-                #             np.random.shuffle(self.blocks_mask)
-
-                #         print((best_blocked_solution_f), best_solution[:20])
-                #         temp_blocked = self._blocker_random(np.array([best_solution]))
-                        
-                #         temp_unblocked = self._unblocker_random(temp_blocked)
-                        
-                #         print(temp_unblocked[0, :20])
-
-                #         best_blocked_solution_f = self._calculate_population_energies(temp_unblocked)[0]
-                #         print(best_blocked_solution_f)
-                        
-                        
-                # if block_changed:
-                #     temp_pop = self._unblocker_random(self.population_blocked)
-                #     self.population_energies = (self._calculate_population_energies(temp_pop))
             else:
                 self.population_energies = (self._calculate_population_energies(self.population))
 
-            print("best f: ", self.population_energies.min())
-            self.best_sol_generations_fit.append(self.population_energies.min())
+            print("Best init population f(x): ", self.population_energies.min())
+            self.best_gens_fitness_history.append(self.population_energies.min())
             # self.plot_fitness_save()
             
             #self._promote_lowest_energy()
@@ -1005,9 +989,10 @@ class DifferentialEvolutionSolver:
             trial_pop = np.array(
                 [self._mutate(i) for i in range(self.num_population_members)])
 
-            if self.block_size != 0:
+            if self.block_size != None:
                 trial_pop_blocked = trial_pop.copy()
-                trial_pop = self._unblocker_random(trial_pop_blocked)
+                # trial_pop = self._unblocker_random(trial_pop_blocked)
+                trial_pop = self._unblocker_optimal(trial_pop_blocked)
                 
 
             # only calculate for feasible entries
@@ -1019,7 +1004,7 @@ class DifferentialEvolutionSolver:
             self.population = np.where(loc[:, np.newaxis], 
                                        trial_pop,
                                        self.population)
-            if self.block_size != 0:
+            if self.block_size != None:
                 self.population_blocked = np.where(loc[:, np.newaxis],
                                        trial_pop_blocked,
                                        self.population_blocked)
@@ -1029,18 +1014,40 @@ class DifferentialEvolutionSolver:
 
         return self.population[self.population_energies.argmin()], self.population_energies.min()
 
+    def _blocker_optimal(self, pop):
+        params_blocked = np.zeros((pop.shape[0], self.blocked_dimensions))
+        for i_p in range(pop.shape[0]):
+            for i in range(self.blocked_dimensions):
+                block_params = pop[i_p, self.blocks_mask[i]]
+                if len(block_params) != 0:
+                    params_blocked[i_p, i] = np.mean(block_params)
+        return params_blocked
+
+    def _blocker_random_average(self, pop):
+        pop_blocked=np.zeros((pop.shape[0], self.blocked_dimensions))
+        for i in range(pop.shape[0]):
+            for j in range(self.blocked_dimensions):
+                temp = np.delete(self.blocks_mask[j], np.where(self.blocks_mask[j] > self.parameter_count-1))
+                pop_blocked[i, j] = np.mean(pop[i, temp])
+
+        return pop_blocked
+    
     def _blocker_random(self, pop):
-        # blocks = np.load(self.blocks_data)
         return pop[:, self.blocks_mask[:, 0]].copy()
         
         
     def _blocker_fixed(self):
         return self.population[:, np.arange(0, self.parameter_count, self.block_size)].copy()
          
+    def _unblocker_optimal(self, pop_blocked):
+        pop_unblocked=np.ones((pop_blocked.shape[0], self.parameter_count))
+        for i_p in range(pop_blocked.shape[0]):
+            for i in range(self.blocked_dimensions):
+                pop_unblocked[i_p, self.blocks_mask[i]] *= pop_blocked[i_p, i]
+        return pop_unblocked
     
     def _unblocker_random(self, pop_blocked):
         pop_unblocked = np.ones((len(pop_blocked), self.parameter_count+((self.block_size-(self.parameter_count%self.block_size)))))
-        # blocks = np.load(self.blocks_data)
         
         for i in range(self.blocked_dimensions):
             # print(pop_unblocked[:, self.blocks_mask[i]].shape)
@@ -1083,7 +1090,7 @@ class DifferentialEvolutionSolver:
 
         rng = self.random_number_generator
         
-        if self.block_size != 0:
+        if self.block_size != None:
             trial = np.copy(self.population_blocked[candidate])
             fill_point = rng.choice(self.blocked_dimensions)
         else:
@@ -1097,7 +1104,7 @@ class DifferentialEvolutionSolver:
             bprime = self.mutation_func(self._select_samples(candidate, 5))
 
         if self.strategy in self._binomial:
-            if self.block_size != 0:
+            if self.block_size != None:
                 crossovers = rng.uniform(size=self.blocked_dimensions)
             else:
                 crossovers = rng.uniform(size=self.parameter_count)
@@ -1130,7 +1137,7 @@ class DifferentialEvolutionSolver:
     def _rand1(self, samples):
         """rand1bin, rand1exp"""
         r0, r1, r2 = samples[:3]
-        if self.block_size != 0:
+        if self.block_size != None:
             return (self.population_blocked[r0] + self.scale *
                 (self.population_blocked[r1] - self.population_blocked[r2]))
         else:
@@ -1176,7 +1183,7 @@ class DifferentialEvolutionSolver:
         """order1bin, order1exp"""
         rand1 = np.asarray(samples[:3])
         r0, r1, r2 = rand1[self.population_energies[rand1].argsort()]
-        if self.block_size != 0:
+        if self.block_size != None:
             return (self.population_blocked[r0] + self.scale *
                 (self.population_blocked[r1] - self.population_blocked[r2]))
         else:
@@ -1195,16 +1202,16 @@ class DifferentialEvolutionSolver:
         return idxs
     
     def plot_fitness_save(self):
-        fitness_history = np.asarray(self.best_sol_generations_fit) * -100
+        fitness_history = np.asarray(self.best_gens_fitness_history) * -100
         if self.local_search:
-            fitness_history = np.concatenate([self.best_sol_generations_fit, self.local_search_fitness_history]) * -100
+            fitness_history = np.concatenate([self.best_gens_fitness_history, self.local_search_fitness_history]) * -100
         plt.figure(figsize=(12, 5))
         plt.plot(fitness_history, label='F1-score')
         plt.xlabel('Iterations')
         plt.ylabel('Fitness')
         plt.legend()
         plt.grid()
-        if self.block_size > 0:
+        if self.block_size != None:
             plt.title('Block DE')
             plt.savefig(self.plot_link)
             # plt.savefig(f'ann_bde_b{self.block_size}_plot.png')
