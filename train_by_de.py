@@ -11,96 +11,113 @@ from gfo import GradientFreeOptimization
 
 
 def optimal_block_generator(dimensions, exp_dimensions,
-                            gfo=None, 
+                            gfo=None, epochs=10,
                             train_loader=None, test_loader=None,
-                            blocks_data=None):
+                            blocks_data=None, model_save_path=None):
     import torch.optim as optim
     import torch.nn as nn
     from sklearn.metrics import f1_score
 
     if os.path.exists(blocks_data):
+        gfo.model.load_state_dict(torch.load(model_save_path))
+        gfo.model.to(gfo.DEVICE)
+        print("Saved model is loaded from:", model_save_path)
+        params = gfo.get_parameters(gfo.model)
+
         import pickle
         with open(blocks_data, 'rb') as f:
             blocks_mask = pickle.load(f)
-        return blocks_data, len(blocks_mask)
+        new_blocked_dims = len(blocks_mask)
+        print("Optimal blocked dimensions:", new_blocked_dims)
+        # return blocks_data, len(blocks_mask)
 
-    model = gfo.model
-    DEVICE = gfo.DEVICE
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    else:
+        model = gfo.model
+        DEVICE = gfo.DEVICE
+        criterion = nn.CrossEntropyLoss()
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    # Step 5: Train the network
-    num_epochs = 10
-    for epoch in range(num_epochs):
-        model.train()
-        running_loss = 0.0
-        true_labels = []
-        predicted_labels = []
+        # Step 5: Train the network
+        num_epochs = epochs
+        for epoch in range(num_epochs):
+            model.train()
+            running_loss = 0.0
+            true_labels = []
+            predicted_labels = []
 
-        for batch_idx, (data, target) in enumerate(train_loader):
-            data, target = data.to(DEVICE), target.to(DEVICE)
-            optimizer.zero_grad()
-            output = model(data)
-            loss = criterion(output, target)
-            loss.backward()
-            optimizer.step()
-            
-            running_loss += loss.item()
-            
-            _, predicted = torch.max(output.data, 1)
-            
-            true_labels.extend(target.tolist())
-            predicted_labels.extend(predicted.tolist())
+            for batch_idx, (data, target) in enumerate(train_loader):
+                data, target = data.to(DEVICE), target.to(DEVICE)
+                optimizer.zero_grad()
+                output = model(data)
+                loss = criterion(output, target)
+                loss.backward()
+                optimizer.step()
+                
+                running_loss += loss.item()
+                
+                _, predicted = torch.max(output.data, 1)
+                
+                true_labels.extend(target.tolist())
+                predicted_labels.extend(predicted.tolist())
 
-        train_loss = running_loss / len(train_loader)
-        train_f1score = f1_score(true_labels, predicted_labels, average='macro')
+            train_loss = running_loss / len(train_loader)
+            train_f1score = f1_score(true_labels, predicted_labels, average='macro')
 
-        print(f'Epoch [{epoch+1}/{num_epochs}], Training Loss: {train_loss:.4f}, Training F1-score: {train_f1score*100:.2f}%')
+            print(f'Epoch [{epoch+1}/{num_epochs}], Training Loss: {train_loss:.4f}, Training F1-score: {train_f1score*100:.2f}%')
+        
+        gfo.model = model
+        torch.save(model.state_dict(), model_save_path)
+        params = gfo.get_parameters(model)
+        print("Model is saved to:", model_save_path)
 
-    params = gfo.get_parameters(model)
-    np.save("ann_params_trained_by_adam.npy", params)
-    f1 = gfo.fitness_func(params)
-    print("F1-score after Adam", f1)
+        # Define the number of bins
+        num_bins = exp_dimensions
 
-    # Define the number of bins
-    num_bins = exp_dimensions
+        # Calculate the bin edges
+        bin_edges = np.linspace(params.min(),params.max(), num_bins)
 
-    # Calculate the bin edges
-    bin_edges = np.linspace(params.min(),params.max(), num_bins)
+        # Split the data into bins
+        binned_data = np.digitize(params, bin_edges)
 
-    # Split the data into bins
-    binned_data = np.digitize(params, bin_edges)
+        blocks_mask=[]
+        for i in range(exp_dimensions):
+            b_i = np.where(binned_data == i)[0]
+            if len(b_i) != 0:
+                blocks_mask.append(b_i)
+        new_blocked_dims = len(blocks_mask)
+        print("Optimal blocked dimensions:", new_blocked_dims)
+        
+        import pickle
+        with open(blocks_data, 'wb') as f:
+            pickle.dump(blocks_mask, f)
 
-    new_blocked_dims=0
-    blocks=[]
-    for i in range(exp_dimensions):
-        b_i = np.where(binned_data == i)[0]
-        if len(b_i) != 0:
-            new_blocked_dims+=1
-            blocks.append(b_i)
-    print("Optimal blocked dimensions",new_blocked_dims)
     # blocking
     params_blocked = np.zeros(new_blocked_dims)
     for i in range(new_blocked_dims):
-        block_params = params[blocks[i]]
+        block_params = params[blocks_mask[i]]
         if len(block_params) != 0:
             params_blocked[i] = np.mean(block_params)
+    print(params_blocked)
     # unblocking
     params_unblocked=np.ones(dimensions)
     for i in range(new_blocked_dims):
-        params_unblocked[blocks[i]] *= params_blocked[i]
+        params_unblocked[blocks_mask[i]] *= params_blocked[i]
 
-    # print(params_unblocked[blocks[len(blocks)//2]])
+    print("Optimized by Adam:")
+    f1_train = gfo.fitness_func(params)
+    print(f"Training data f1-score {-100*f1_train:.2f}%")
+    f1_test = gfo.evaluate_params(params, test_loader)
+    print(f"Test data f1-score {100*f1_test:.2f}%")
+    print("-"*50)
+
     print("After blocking and unblocking...")
     f1_train = gfo.fitness_func(params_unblocked)
-    print("Training data f1-score ", f1_train)
+    print(f"Training data f1-score {-100*f1_train:.2f}%")
     f1_test = gfo.evaluate_params(params_unblocked, test_loader)
-    print("Test data f1-score", f1_test)
+    print(f"Test data f1-score {100*f1_test:.2f}%")
+    print("-"*50)
 
-    import pickle
-    with open(blocks_data, 'wb') as f:
-        pickle.dump(blocks, f)
-    return blocks_data, new_blocked_dims
+    return blocks_mask, new_blocked_dims
 
 def random_block_generator(dimensions, exp_dimensions,
                             block_size, seed=None):
@@ -121,10 +138,7 @@ def random_block_generator(dimensions, exp_dimensions,
                 tries+=1
     return blocks_data
 
-def unblocker_optimal(pop_blocked, true_dimensions, blocked_dimensions, blocks_link):
-    import pickle
-    with open(blocks_link, 'rb') as f:
-        blocks_mask = pickle.load(f)
+def unblocker_optimal(pop_blocked, true_dimensions, blocked_dimensions, blocks_mask):
     pop_unblocked=np.ones((pop_blocked.shape[0], true_dimensions))
     for i_p in range(pop_blocked.shape[0]):
         for i in range(blocked_dimensions):
@@ -145,18 +159,22 @@ def main(args):
         samples_per_class = args.data_size // num_classes
         train_loader = load_mnist_train_selection(samples_per_class=samples_per_class,
                                                    seed=args.seed_data, batch_size=args.batch_size)
+        train_loader_full = load_mnist_train_full(batch_size=args.batch_size)
         test_loader = load_mnist_test(batch_size=args.batch_size)
     elif args.dataset == "CIFAR10":
+        print("Correct dataset")
         num_classes = 10
         samples_per_class = args.data_size // num_classes
         train_loader = load_cifar10_train_selection(samples_per_class=samples_per_class,
                                                      seed=args.seed_data, batch_size=args.batch_size)
+        train_loader_full = load_cifar10_train_full(batch_size=args.batch_size)
         test_loader = load_cifar10_test(batch_size=args.batch_size)
     elif args.dataset == "CIFAR100":
         num_classes = 100
         samples_per_class = args.data_size // num_classes
         train_loader = load_cifar100_train_selection(samples_per_class=samples_per_class,
                                                       seed=args.seed_data, batch_size=args.batch_size)
+        train_loader_full = load_cifar100_train_full(batch_size=args.batch_size)
         test_loader = load_cifar100_test(batch_size=args.batch_size)
     else: 
         ValueError("Please enter a valid dataset, choose between:", ["MNIST", "CIFAR10", "CIFAR100"])
@@ -212,10 +230,13 @@ def main(args):
                 exp_dimensions = dimensions//block_size
                 if dimensions//block_size % 10 != 0:
                     exp_dimensions +=1
-
-            blocks_data, blocked_dimensions = optimal_block_generator(dimensions=dimensions, exp_dimensions=exp_dimensions,
-                                                gfo=gfo, train_loader=train_loader, test_loader=test_loader,
-                                                blocks_data=f"./data/blocks/{args.model}_{args.dataset}_optimal_blocks_maxD{exp_dimensions}_data.pickle")
+            blocks_data=f"./data/blocks/{args.model}_{args.dataset}_epochs{args.epochs}_optimal_blocks_maxD{exp_dimensions}_data.pickle"
+            model_save_path=f"{args.output_dir}{args.model.lower()}_{args.dataset}_epochs{args.epochs}_state_dict"
+            blocks_mask, blocked_dimensions = optimal_block_generator(dimensions=dimensions, exp_dimensions=exp_dimensions,
+                                                gfo=gfo, epochs=args.epochs, 
+                                                train_loader=train_loader_full, test_loader=test_loader,
+                                                blocks_data=blocks_data,
+                                                model_save_path=model_save_path)
             
             if blocked_dimensions != exp_dimensions:
                 file_mid += f"bd{blocked_dimensions}_"
@@ -224,9 +245,9 @@ def main(args):
             mut_dims = blocked_dimensions
 
             initial_population = gfo.population_initializer_by_blocked_intervals(popsize, blocked_dimensions,
-                                                                                  blocks_data, seed=seed_block)
-            
-            unblocked_pop = unblocker_optimal(initial_population, dimensions, blocked_dimensions, blocks_data)
+                                                                                  blocks_mask, seed=seed_block)
+            print(initial_population[0])
+            unblocked_pop = unblocker_optimal(initial_population, dimensions, blocked_dimensions, blocks_mask)
             bounds = np.concatenate([unblocked_pop.min(axis=0).reshape(-1, 1), unblocked_pop.max(axis=0).reshape(-1,1)], axis=1)
 
             # blocks_data = random_block_generator(dimensions=dimensions, blocked_dimensions=blocked_dimensions,
@@ -255,7 +276,7 @@ def main(args):
         print(save_link)
         if os.path.exists(save_link+'.npz'):
             continue
-        print(args.local_search)
+        # print(args.local_search)
         res = block_differential_evolution(gfo.fitness_func, bounds, 
                                                 mutation=mutation_rate, maxiter=max_iterations, block_size=block_size,
                                                 blocked_dimensions=blocked_dimensions,
@@ -276,6 +297,7 @@ if __name__ == '__main__':
 
     # Neural Network model
     parser.add_argument('--model', type=str, default="ANN", help='Model to use')
+    parser.add_argument('--epochs', type=int, default=10, help='Number of epochs the model to be trained/fine-tuned')
 
     # dataset
     parser.add_argument('--dataset', type=str, default="MNIST", help='Dataset to be evlauated')

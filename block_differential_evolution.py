@@ -921,7 +921,7 @@ class DifferentialEvolutionSolver:
             else:
                 self.population_energies = (self._calculate_population_energies(self.population))
 
-            print("Best init population f(x): ", self.population_energies.min())
+            print(f"Best init population f(x): {100*self.population_energies.min():.2f}")
             self.best_gens_fitness_history.append(self.population_energies.min())
             # self.plot_fitness_save()
             

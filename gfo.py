@@ -34,7 +34,9 @@ class GradientFreeOptimization():
     def set_weights(self, model_state, all_parameters):
         counted_params = 0
         for p in model_state:
-            if ('weight' in p or 'bias' in p) and (not 'num_batches_tracked' in p):
+            # if ('weight' in p or 'bias' in p or 'running' in p) and (not 'num_batches_tracked' in p):
+            # if (not 'num_batches_tracked' in p):
+            if 'weight' in p or 'bias' in p:
                 model_state[p] = torch.tensor(all_parameters[counted_params:self.params_sizes[p].numel()+counted_params]).reshape(self.params_sizes[p])
                 counted_params += self.params_sizes[p].numel()
         return model_state
@@ -102,7 +104,9 @@ class GradientFreeOptimization():
         model_state = model.state_dict()
         params=[]
         for p in model_state:
-            if ('weight' in p or 'bias' in p) and (not 'num_batches_tracked' in p):
+            # if ('weight' in p or 'bias' in p or 'running' in p) and (not 'num_batches_tracked' in p):
+            # if (not 'num_batches_tracked' in p):
+            if 'weight' in p or 'bias' in p:
                 params.append(model_state[p].view(-1))
         params = torch.cat(params).cpu().detach().numpy()
         return params
@@ -116,13 +120,9 @@ class GradientFreeOptimization():
             initial_population.append([params])
         return np.concatenate(initial_population, axis=0)
     
-    def population_initializer_by_blocked_intervals(self, popsize, blocked_dimensions, blocks_data, seed=42):
+    def population_initializer_by_blocked_intervals(self, popsize, blocked_dimensions, blocks_mask, seed=42):
         rng = np.random.default_rng(seed)
-        
-        import pickle
-        with open(blocks_data, 'rb') as f:
-            blocks_mask = pickle.load(f)
-        params = np.load("ann_params_trained_by_adam.npy")
+        params = self.get_parameters(self.model)
 
         initial_population = []
         for i in range(popsize):
