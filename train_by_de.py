@@ -130,21 +130,21 @@ def optimal_block_generator(
         block_params = params[blocks_mask[i]]
         if len(block_params) != 0:
             params_blocked[i] = np.mean(block_params)
-    # print(params_blocked)
+
     # unblocking
     params_unblocked = np.ones(dimensions)
     for i in range(new_blocked_dims):
         params_unblocked[blocks_mask[i]] *= params_blocked[i]
 
+    print("-" * 50)
     print("Optimized by Adam:")
-    f1_train = 1 - gfo.fitness_func(params)
+    f1_train = gfo.evaluate_params(params, train_loader)
     print(f"Training data f1-score {100*f1_train:.2f}%")
     f1_test = gfo.evaluate_params(params, test_loader)
     print(f"Test data f1-score {100*f1_test:.2f}%")
-    print("-" * 50)
 
     print("After blocking and unblocking...")
-    f1_train = 1 - gfo.fitness_func(params_unblocked)
+    f1_train = gfo.evaluate_params(params_unblocked, train_loader)
     print(f"Training data f1-score {100*f1_train:.2f}%")
     f1_test = gfo.evaluate_params(params_unblocked, test_loader)
     print(f"Test data f1-score {100*f1_test:.2f}%")
@@ -186,7 +186,7 @@ def unblocker_optimal(pop_blocked, true_dimensions, blocked_dimensions, blocks_m
 
 
 def main(args):
-    DEVICE = "cuda" if torch.cuda.is_available() and args.cuda else "cpu"
+    DEVICE = "cuda:0" if torch.cuda.is_available() and args.cuda else "cpu"
     print("Running on device:", DEVICE.upper())
 
     if not os.path.exists(args.output_dir):
@@ -194,46 +194,38 @@ def main(args):
 
     num_classes = None
     data_shape = None
+    full_train_loader = None
+    sample_train_loader = None
     if args.dataset == "MNIST":
         num_classes = 10
         data_shape = (28, 28, 1)
-        samples_per_class = args.data_size // num_classes
-        train_loader = None
-        if args.data_size == 60000:
-            train_loader = load_mnist_train_full(batch_size=args.batch_size)
-        else:
-            train_loader = load_mnist_train_selection(
-                samples_per_class=samples_per_class,
-                seed=args.seed_data,
-                batch_size=args.batch_size,
-            )
+        full_train_loader = load_mnist_train_full(batch_size=args.batch_size)
+        sample_train_loader = load_mnist_train_each_step(
+            num_samples=args.data_size,
+            seed=args.seed_data,
+            batch_size=args.batch_size,
+        )
         test_loader = load_mnist_test(batch_size=args.batch_size)
     elif args.dataset == "CIFAR10":
         print("Correct dataset")
         num_classes = 10
         data_shape = (32, 32, 3)
-        samples_per_class = args.data_size // num_classes
-        if args.data_size == 60000:
-            train_loader = load_cifar10_train_full(batch_size=args.batch_size)
-        else:
-            train_loader = load_cifar10_train_selection(
-                samples_per_class=samples_per_class,
-                seed=args.seed_data,
-                batch_size=args.batch_size,
-            )
+        full_train_loader = load_cifar10_train_full(batch_size=args.batch_size)
+        sample_train_loader = load_cifar10_train_each_step(
+            num_samples=args.data_size,
+            seed=args.seed_data,
+            batch_size=args.batch_size,
+        )
         test_loader = load_cifar10_test(batch_size=args.batch_size)
     elif args.dataset == "CIFAR100":
         num_classes = 100
         data_shape = (32, 32, 3)
-        samples_per_class = args.data_size // num_classes
-        if args.data_size == 60000:
-            train_loader = load_cifar100_train_full(batch_size=args.batch_size)
-        else:
-            train_loader = load_cifar100_train_selection(
-                samples_per_class=samples_per_class,
-                seed=args.seed_data,
-                batch_size=args.batch_size,
-            )
+        full_train_loader = load_cifar100_train_full(batch_size=args.batch_size)
+        sample_train_loader = load_cifar100_train_each_step(
+            num_samples=args.data_size,
+            seed=args.seed_data,
+            batch_size=args.batch_size,
+        )
         test_loader = load_cifar100_test(batch_size=args.batch_size)
     else:
         ValueError(
@@ -300,7 +292,7 @@ def main(args):
             neural_network=model,
             weights=weights,
             num_classes=num_classes,
-            data_loader=train_loader,
+            data_loader=sample_train_loader,
             val_loader=test_loader,
             data_shape=data_shape,
             DEVICE=DEVICE,
@@ -327,10 +319,10 @@ def main(args):
             model = pre_train_model(
                 gfo,
                 epochs=args.epochs,
-                train_loader=train_loader,
+                train_loader=full_train_loader,
                 model_save_path=model_save_path,
             )
-            print(gfo.get_parameters(model)[0:10])
+            # print(gfo.get_parameters(model)[0:10])
             gfo.model = model
             print("Model is pre-trained and saved to:", model_save_path + ".pth")
         else:
@@ -358,7 +350,7 @@ def main(args):
                     dimensions=dimensions,
                     exp_dimensions=exp_dimensions,
                     gfo=gfo,
-                    train_loader=train_loader,
+                    train_loader=full_train_loader,
                     test_loader=test_loader,
                     blocks_path=blocks_path,
                 )
@@ -390,14 +382,14 @@ def main(args):
                 blocked_dimensions = exp_dimensions
                 initial_population = gfo.population_initializer(popsize, seed=seed_pop)
                 if args.pre_train:
-                    # gfo.model.load_state_dict(torch.load(model_save_path + ".pth"))
-                    # gfo.model.to(gfo.DEVICE)
-                    # print(
-                    #     "Saved pre-trained model is loaded from:",
-                    #     model_save_path + ".pth",
-                    # )
-                    adam_opt_params = gfo.get_parameters(gfo.model)
-                    print(adam_opt_params[0:10])
+                    gfo.model.load_state_dict(torch.load(model_save_path + ".pth"))
+                    gfo.model.to(gfo.DEVICE)
+                    print(
+                        "Saved pre-trained model is loaded from:",
+                        model_save_path + ".pth",
+                    )
+                    # adam_opt_params = gfo.get_parameters(gfo.model)
+                    # print(adam_opt_params[0:10])
                     initial_population[-1] = gfo.get_parameters(gfo.model)
 
                 bounds = np.concatenate(
@@ -435,11 +427,11 @@ def main(args):
             )
 
         if args.mut_rate == "vectorized":
-            mutation_rate = [np.array([0.1] * mut_dims), np.array([1.5] * mut_dims)]
+            mutation_rate = [np.array([0.1] * mut_dims), np.array([1.0] * mut_dims)]
         elif args.mut_rate == "const":
             mutation_rate = 0.5
         elif args.mut_rate == "random":
-            mutation_rate = [[0.1], [1.5]]
+            mutation_rate = [[0.1], [1.0]]
         else:
             ValueError("Please enter a valid mutation rate initialization")
 

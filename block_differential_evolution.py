@@ -415,11 +415,13 @@ class DifferentialEvolutionSolver:
 
         if self.block_size != None:
             if np.size(popn, 1) == self.blocked_dimensions:
+                print("Here1")
                 self.population_blocked = popn
-                self.population = self._unblocker_optimal(popn)
+                # self.population = self._unblocker_optimal(popn)
             elif self.block_size == -1:
                 # self.population_blocked = self._blocker_random(self.population)
                 # self.population_blocked = self._blocker_random_average(self.population)
+                print("Here2")
                 self.population_blocked = self._blocker_optimal(self.population)
             else:
                 self.population_blocked = self._blocker_random(self.population)
@@ -481,9 +483,17 @@ class DifferentialEvolutionSolver:
                 next(self)
                 self.best_gens_fitness_history.append(self.population_energies.min())
                 # self.best_gens_solution.append(self.population[self.population_energies.argmin()])
-                self.best_gens_solution = self.population[
-                    self.population_energies.argmin()
-                ]
+                if self.block_size != None:
+                    self.best_gens_solution = self.population_blocked[
+                        self.population_energies.argmin()
+                    ]
+                    self.best_gens_solution = self._unblocker_optimal(
+                        np.array([self.best_gens_solution])
+                    )[0]
+                else:
+                    self.best_gens_solution = self.population[
+                        self.population_energies.argmin()
+                    ]
             except StopIteration:
                 warning_flag = True
                 if self._nfev > self.maxfun:
@@ -499,12 +509,7 @@ class DifferentialEvolutionSolver:
 
             if self.disp and nit % 10 == 1:
                 val = self.val_func(self.best_gens_solution)
-                np.savez(
-                    self.save_link,
-                    best_solution=self.best_gens_solution,
-                    fitness_history=self.best_gens_fitness_history,
-                    last_population=self.population,
-                )
+
                 print(
                     "differential_evolution step %d: f(x)= %.6f, 1-f(x)= %.6f, 1-f'(x)= %.6f"
                     % (
@@ -513,6 +518,18 @@ class DifferentialEvolutionSolver:
                         1 - self.population_energies.min(),
                         val,
                     )
+                )
+            if nit % 100 == 1:
+                pop = None
+                if self.block_size == None:
+                    pop = self.population
+                else:
+                    pop = self.population_blocked
+                np.savez(
+                    self.save_link,
+                    best_solution=self.best_gens_solution,
+                    fitness_history=self.best_gens_fitness_history,
+                    last_population=pop,
                 )
 
         DE_result = OptimizeResult(
@@ -524,79 +541,79 @@ class DifferentialEvolutionSolver:
             success=(warning_flag is not True),
         )
 
-        if self.local_search:
-            best_solution = self.population_blocked[self.population_energies.argmin()]
-            best_fitness = DE_result.fun
-            var_max = np.max(self.population_blocked, axis=0)
-            var_min = np.min(self.population_blocked, axis=0)
-            for i in range(self.nit_cd):
-                if self._nfev == self.maxfun:
-                    status_message = (
-                        "Maximum number of function evaluations has been reached."
-                    )
-                    break
-                for d in range(self.blocked_dimensions):
-                    l_d = var_max[d] - var_min[d]
-                    c1 = best_solution.copy()
-                    c2 = best_solution.copy()
-                    c1[d] = var_min[d] + l_d / 4
-                    c2[d] = var_max[d] - l_d / 4
-                    c1_f, c2_f = self._calculate_population_energies(
-                        self._unblocker_random(np.array([c1, c2]))
-                    )
+        # if self.local_search:
+        #     best_solution = self.population_blocked[self.population_energies.argmin()]
+        #     best_fitness = DE_result.fun
+        #     var_max = np.max(self.population_blocked, axis=0)
+        #     var_min = np.min(self.population_blocked, axis=0)
+        #     for i in range(self.nit_cd):
+        #         if self._nfev == self.maxfun:
+        #             status_message = (
+        #                 "Maximum number of function evaluations has been reached."
+        #             )
+        #             break
+        #         for d in range(self.blocked_dimensions):
+        #             l_d = var_max[d] - var_min[d]
+        #             c1 = best_solution.copy()
+        #             c2 = best_solution.copy()
+        #             c1[d] = var_min[d] + l_d / 4
+        #             c2[d] = var_max[d] - l_d / 4
+        #             c1_f, c2_f = self._calculate_population_energies(
+        #                 self._unblocker_random(np.array([c1, c2]))
+        #             )
 
-                    if c1_f < c2_f < best_fitness:
-                        best_solution = c1.copy()
-                        best_fitness = c1_f
-                        var_max[d] -= l_d / 2
-                    elif c2_f < c1_f < best_fitness:
-                        best_solution = c2.copy()
-                        best_fitness = c2_f
-                        var_min[d] += l_d / 2
-                    else:
-                        var_min[d] += l_d / 4
-                        var_max[d] -= l_d / 4
+        #             if c1_f < c2_f < best_fitness:
+        #                 best_solution = c1.copy()
+        #                 best_fitness = c1_f
+        #                 var_max[d] -= l_d / 2
+        #             elif c2_f < c1_f < best_fitness:
+        #                 best_solution = c2.copy()
+        #                 best_fitness = c2_f
+        #                 var_min[d] += l_d / 2
+        #             else:
+        #                 var_min[d] += l_d / 4
+        #                 var_max[d] -= l_d / 4
 
-                if self.disp:
-                    print(
-                        "local search CD step %d: f(x)= %.6f, 1-f(x)= %.6f"
-                        % (i, best_fitness, 1 - best_fitness)
-                    )
+        #         if self.disp:
+        #             print(
+        #                 "local search CD step %d: f(x)= %.6f, 1-f(x)= %.6f"
+        #                 % (i, best_fitness, 1 - best_fitness)
+        #             )
 
-                self.local_search_fitness_history.append(best_fitness)
-                # self.best_gens_solution.append(self.population[self.population_energies.argmin()])
-                self.best_gens_solution = self.population[
-                    self.population_energies.argmin()
-                ]
-                self.plot_fitness_save()
-                np.savez(
-                    self.save_link,
-                    best_solution=self.best_gens_solution,
-                    fitness_history=self.best_gens_fitness_history,
-                    local_search_fitness_history=self.local_search_fitness_history,
-                    last_population=self.population,
-                )
+        #         self.local_search_fitness_history.append(best_fitness)
+        #         # self.best_gens_solution.append(self.population[self.population_energies.argmin()])
+        #         self.best_gens_solution = self.population[
+        #             self.population_energies.argmin()
+        #         ]
+        #         self.plot_fitness_save()
+        #         np.savez(
+        #             self.save_link,
+        #             best_solution=self.best_gens_solution,
+        #             fitness_history=self.best_gens_fitness_history,
+        #             local_search_fitness_history=self.local_search_fitness_history,
+        #             last_population=self.population,
+        #         )
 
-            DE_result.nfev = self._nfev
-            DE_result.fun = best_fitness
-            #
-            DE_result.x = self._unblocker_optimal(np.array([best_solution]))[0]
-            DE_result.message = status_message
-            # to keep internal state consistent
-            self.population_energies[0] = best_fitness
-            self.population[0] = DE_result.x
+        #     DE_result.nfev = self._nfev
+        #     DE_result.fun = best_fitness
+        #     #
+        #     DE_result.x = self._unblocker_optimal(np.array([best_solution]))[0]
+        #     DE_result.message = status_message
+        #     # to keep internal state consistent
+        #     self.population_energies[0] = best_fitness
+        #     self.population[0] = DE_result.x
 
-            self.local_search_fitness_history.append(best_fitness)
-            # self.best_gens_solution.append(self.population[self.population_energies.argmin()])
-            self.best_gens_solution = self.population[self.population_energies.argmin()]
-            self.plot_fitness_save()
-            np.savez(
-                self.save_link,
-                best_solution=self.best_gens_solution,
-                fitness_history=self.best_gens_fitness_history,
-                local_search_fitness_history=self.local_search_fitness_history,
-                last_population=self.population,
-            )
+        #     self.local_search_fitness_history.append(best_fitness)
+        #     # self.best_gens_solution.append(self.population[self.population_energies.argmin()])
+        #     self.best_gens_solution = self.population[self.population_energies.argmin()]
+        #     self.plot_fitness_save()
+        #     np.savez(
+        #         self.save_link,
+        #         best_solution=self.best_gens_solution,
+        #         fitness_history=self.best_gens_fitness_history,
+        #         local_search_fitness_history=self.local_search_fitness_history,
+        #         last_population=self.population,
+        #     )
 
         if self.polish and not np.all(self.integrality):
             # can't polish if all the parameters are integers
@@ -664,11 +681,16 @@ class DifferentialEvolutionSolver:
                 )
 
         self.plot_fitness_save()
+        pop = None
+        if self.block_size == None:
+            pop = self.population
+        else:
+            pop = self.population_blocked
         np.savez(
             self.save_link,
             best_solution=self.best_gens_solution,
             fitness_history=self.best_gens_fitness_history,
-            last_population=self.population,
+            last_population=pop,
         )
 
         return DE_result
@@ -698,10 +720,17 @@ class DifferentialEvolutionSolver:
 
         energies = np.full(num_members, np.inf)
 
-        parameters_pop = self._scale_parameters(population)
+        # parameters_pop = self._scale_parameters(population)
+        calc_energies = []
         try:
-            calc_energies = list(self._mapwrapper(self.func, parameters_pop[0:S]))
-            calc_energies = np.squeeze(calc_energies)
+            if self.block_size == None:
+                calc_energies = list(self._mapwrapper(self.func, population[0:S]))
+                calc_energies = np.squeeze(calc_energies)
+            else:
+                for s in population:
+                    unb_s = self._unblocker_optimal(np.array([s]))[0]
+                    calc_energies.append(self.func(unb_s))
+                calc_energies = np.squeeze(calc_energies)
         except (TypeError, ValueError) as e:
             # wrong number of arguments for _mapwrapper
             # or wrong length returned from the mapper
@@ -807,11 +836,13 @@ class DifferentialEvolutionSolver:
             # feasible
             if self.block_size != None:
                 # temp_pop = self._unblocker_random(self.population_blocked)
-                if self.block_size < 0:
-                    temp_pop = self._unblocker_optimal(self.population_blocked)
-                else:
-                    temp_pop = self._unblocker_random(self.population_blocked)
-                self.population_energies = self._calculate_population_energies(temp_pop)
+                # if self.block_size < 0:
+                #     temp_pop = self._unblocker_optimal(self.population_blocked)
+                # else:
+                #     temp_pop = self._unblocker_random(self.population_blocked)
+                self.population_energies = self._calculate_population_energies(
+                    self.population_blocked
+                )
             else:
                 self.population_energies = self._calculate_population_energies(
                     self.population
@@ -819,7 +850,17 @@ class DifferentialEvolutionSolver:
 
             self.best_gens_fitness_history.append(self.population_energies.min())
             # self.best_gens_solution.append(self.population[self.population_energies.argmin()])
-            self.best_gens_solution = self.population[self.population_energies.argmin()]
+            if self.block_size != None:
+                self.best_gens_solution = self.population_blocked[
+                    self.population_energies.argmin()
+                ]
+                self.best_gens_solution = self._unblocker_optimal(
+                    np.array([self.best_gens_solution])
+                )[0]
+            else:
+                self.best_gens_solution = self.population[
+                    self.population_energies.argmin()
+                ]
 
             val = self.val_func(self.best_gens_solution)
             print(
@@ -877,31 +918,43 @@ class DifferentialEvolutionSolver:
                 [self._mutate(i) for i in range(self.num_population_members)]
             )
 
-            if self.block_size != None:
-                trial_pop_blocked = trial_pop.copy()
-                # trial_pop = self._unblocker_random(trial_pop_blocked)
-                if self.block_size < 0:
-                    trial_pop = self._unblocker_optimal(trial_pop_blocked)
-                elif self.block_size != None:
-                    trial_pop = self._unblocker_random(trial_pop_blocked)
+            # if self.block_size != None:
+            #     trial_pop_blocked = trial_pop.copy()
+            #     # trial_pop = self._unblocker_random(trial_pop_blocked)
+            #     if self.block_size < 0:
+            #         trial_pop = self._unblocker_optimal(trial_pop_blocked)
+            #     elif self.block_size != None:
+            #         trial_pop = self._unblocker_random(trial_pop_blocked)
 
             # only calculate for feasible entries
             trial_energies = self._calculate_population_energies(trial_pop)
+            # print(
+            #     trial_energies[trial_energies.argsort()[:10]],
+            #     self.population_energies[self.population_energies.argsort()[:10]],
+            # )
 
             # which solutions are 'improved'?
             loc = trial_energies < self.population_energies
             loc = np.array(loc)
-            self.population = np.where(loc[:, np.newaxis], trial_pop, self.population)
+            # self.population = np.where(loc[:, np.newaxis], trial_pop, self.population)
             if self.block_size != None:
                 self.population_blocked = np.where(
-                    loc[:, np.newaxis], trial_pop_blocked, self.population_blocked
+                    loc[:, np.newaxis], trial_pop, self.population_blocked
                 )
             self.population_energies = np.where(
                 loc, trial_energies, self.population_energies
             )
-
+        trial_pop = None
+        if self.block_size != None:
+            trial_pop_blocked = self.population_blocked
+            if self.block_size < 0:
+                trial_pop = self._unblocker_optimal(trial_pop_blocked)
+            elif self.block_size != None:
+                trial_pop = self._unblocker_random(trial_pop_blocked)
+        else:
+            trial_pop = self.population
         return (
-            self.population[self.population_energies.argmin()],
+            trial_pop[self.population_energies.argmin()],
             self.population_energies.min(),
         )
 

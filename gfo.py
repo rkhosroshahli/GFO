@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -14,7 +15,7 @@ class GradientFreeOptimization:
         data_shape=None,
         val_loader=None,
         metric="f1",
-        DEVICE="cpu",
+        DEVICE="cuda",
     ):
         self.DEVICE = DEVICE
         self.network = neural_network
@@ -84,6 +85,7 @@ class GradientFreeOptimization:
 
         with torch.no_grad():
             for batch_idx, (data, label) in enumerate(self.data_loader):
+                # print(data.shape)
                 data, label = data.to(self.DEVICE), label.to(self.DEVICE)
                 output = model(data)
                 # loss = criterion(output, label)
@@ -117,9 +119,12 @@ class GradientFreeOptimization:
         if len(parameters) != len(self.get_parameters(self.model)):
             error_msg = f"Not matched sizes of parameters, given parameters length: {len(parameters)}, model parameters length: {len(self.get_parameters(self.model))}"
             raise Exception(error_msg)
+        start_time = time.time()
         self.model.load_state_dict(
             self.set_weights(self.model.state_dict(), parameters)
         )
+        end_time = time.time()
+        # print(end_time-start_time)
         self.model.to(self.DEVICE)
         self.model.eval()
         fitness = 1 - self.score_in_optimization()
