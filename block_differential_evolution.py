@@ -936,10 +936,14 @@ class DifferentialEvolutionSolver:
             # which solutions are 'improved'?
             loc = trial_energies < self.population_energies
             loc = np.array(loc)
-            # self.population = np.where(loc[:, np.newaxis], trial_pop, self.population)
+
             if self.block_size != None:
                 self.population_blocked = np.where(
                     loc[:, np.newaxis], trial_pop, self.population_blocked
+                )
+            else:
+                self.population = np.where(
+                    loc[:, np.newaxis], trial_pop, self.population
                 )
             self.population_energies = np.where(
                 loc, trial_energies, self.population_energies
