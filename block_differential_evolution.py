@@ -386,7 +386,7 @@ class DifferentialEvolutionSolver:
             self.best_gens_fitness_history = npzfile["fitness_history"].tolist()
             # self.local_search_fitness_history=npzfile["local_search_fitness_history"]
 
-        self.startiter = len(self.best_gens_fitness_history)
+        self.startiter = len(self.best_gens_fitness_history) + 1
         self.init_population_array(init)
         self.val_func = val_func
 
@@ -519,7 +519,7 @@ class DifferentialEvolutionSolver:
                         val,
                     )
                 )
-            if nit % 100 == 1:
+            if nit % 10 == 0:
                 pop = None
                 if self.block_size == None:
                     pop = self.population

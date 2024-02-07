@@ -1,3 +1,4 @@
+import os
 import time
 import numpy as np
 import torch
@@ -45,33 +46,26 @@ class GradientFreeOptimization:
         self.params_sizes = {}
 
     def find_param_sizes(self):
-        for p in self.model.state_dict():
-            # if ('weight' in p or 'bias' in p) and (not 'num_batches_tracked' in p):
-            self.params_sizes[p] = self.model.state_dict()[p].size()
+        for name, param in self.model.named_parameters():
+            if param.requires_grad:
+                self.params_sizes[name] = param.size()
 
     def get_parameters(self, model):
-        model_state = model.state_dict()
         params = []
-        for p in model_state:
-            # if ('weight' in p or 'bias' in p or 'running' in p) and (not 'num_batches_tracked' in p):
-            # if (not 'num_batches_tracked' in p):
-            if "weight" in p or "bias" in p:
-                params.append(model_state[p].view(-1))
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                # print(param.size())
+                params.append(torch.flatten(param))
         params = torch.cat(params).cpu().detach().numpy()
         return params
 
     def set_weights(self, model_state, all_parameters):
         counted_params = 0
-        for p in model_state:
-            # if ('weight' in p or 'bias' in p or 'running' in p) and (not 'num_batches_tracked' in p):
-            # if (not 'num_batches_tracked' in p):
-            if "weight" in p or "bias" in p:
-                model_state[p] = torch.tensor(
-                    all_parameters[
-                        counted_params : self.params_sizes[p].numel() + counted_params
-                    ]
-                ).reshape(self.params_sizes[p])
-                counted_params += self.params_sizes[p].numel()
+        for name, param in self.model.named_parameters():
+            model_state[name] = torch.tensor(
+                all_parameters[counted_params : param.size().numel() + counted_params]
+            ).reshape(param.size())
+            counted_params += param.size().numel()
         return model_state
 
     def score_in_optimization(self, model=None):
@@ -90,7 +84,8 @@ class GradientFreeOptimization:
                 output = model(data)
                 # loss = criterion(output, label)
                 # running_loss += loss.item()
-                _, pred = torch.max(output.data, 1)
+                out = nn.functional.softmax(output, dim=1)
+                _, pred = torch.max(out, dim=1)
 
                 true_labels.extend(label.tolist())
                 predicted_labels.extend(pred.tolist())
@@ -166,7 +161,8 @@ class GradientFreeOptimization:
                 output = model(data)
                 # loss = criterion(output, label)
                 # running_loss += loss.item()
-                _, pred = torch.max(output.data, 1)
+                out = nn.functional.softmax(output, dim=1)
+                _, pred = torch.max(out, dim=1)
 
                 true_labels.extend(label.tolist())
                 predicted_labels.extend(pred.tolist())
@@ -191,7 +187,7 @@ class GradientFreeOptimization:
             score = correct_5.cpu().numpy() / len(data_loader.dataset)
         return score
 
-    def population_initializer(self, popsize, seed=42):
+    def random_population_init(self, popsize, seed=42):
         torch.manual_seed(seed)
         initial_population = []
         for i in range(popsize):
@@ -213,7 +209,7 @@ class GradientFreeOptimization:
             initial_population.append([params])
         return np.concatenate(initial_population, axis=0)
 
-    def population_initializer_by_blocked_intervals(
+    def optimized_population_init(
         self, popsize, blocked_dimensions, blocks_mask, seed=42
     ):
         rng = np.random.default_rng(seed)
@@ -231,3 +227,107 @@ class GradientFreeOptimization:
             initial_population.append([params_blocked])
 
         return np.concatenate(initial_population, axis=0)
+
+    def optimized_local_search_boundaries(
+        self, blocked_dimensions, blocks_mask, seed=42
+    ):
+        rng = np.random.default_rng(seed)
+        params = self.get_parameters(self.model)
+
+        var_min = np.zeros((blocked_dimensions))
+        var_max = np.zeros((blocked_dimensions))
+
+        for i in range(1, blocked_dimensions - 1):
+            # block_params = params[blocks_mask[i]]
+            if len(blocks_mask[i]) != 0:
+                var_min[i] = params[blocks_mask[i - 1]].min()
+                var_max[i] = params[blocks_mask[i + 1]].max()
+
+        # ENABLE WHEN MERGE is not DONE!!!
+        # var_min[0] = var_max[0] = params[blocks_mask[0]].copy()
+        # var_min[-1] = var_max[-1] = params[blocks_mask[-1]].copy()
+
+        return var_min, var_max
+
+    def pre_train(self, epochs=10, train_loader=None, model_save_path=None):
+        model = self.model
+        # print(model_save_path)
+        import torch
+        import torch.optim as optim
+        import torch.nn as nn
+
+        if os.path.exists(model_save_path + ".pth"):
+            self.model.load_state_dict(torch.load(model_save_path + ".pth"))
+            self.model.to(self.DEVICE)
+            print("Saved model is loaded from:", model_save_path + ".pth")
+            return self.model
+
+        criterion = nn.CrossEntropyLoss()
+        # criterion = nn.NLLLoss()
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+        train_f1_history = []
+        train_loss_history = []
+        val_f1_history = []
+        # Step 5: Train the network
+        num_epochs = epochs
+        for epoch in range(num_epochs):
+            model.train()
+            running_loss = 0.0
+            true_labels = []
+            predicted_labels = []
+
+            for batch_idx, (data, label) in enumerate(train_loader):
+                data, label = data.to(self.DEVICE), label.to(self.DEVICE)
+                output = model(data)
+                out = nn.functional.softmax(output, dim=1)
+                _, pred = torch.max(out, dim=1)
+                loss = criterion(output, label)
+                # log_probs = nn.functional.log_softmax(output, dim=1)
+                # loss = criterion(log_probs, label)
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                running_loss += loss.item()
+
+                _, pred = torch.max(output.data, 1)
+
+                true_labels.extend(label.tolist())
+                predicted_labels.extend(pred.tolist())
+
+            train_loss = running_loss / len(train_loader)
+            train_loss_history.append(train_loss)
+            train_f1score = f1_score(true_labels, predicted_labels, average="macro")
+            val_f1score = self.validation_func(self.get_parameters(model))
+            train_f1_history.append(train_f1score)
+            val_f1_history.append(val_f1score)
+
+            print(
+                f"Epoch: {epoch}| Train loss: {train_loss: .5f}| Train acc: {train_f1score: .5f}| Val acc: {val_f1score: .5f}"
+            )
+            # print(
+            #     f"Epoch [{epoch+1}/{num_epochs}], Training Loss: {train_loss:.4f}, F1-score: {train_f1score*100:.2f}%, Validation"
+            # )
+        import matplotlib.pyplot as plt
+
+        plt.plot(train_f1_history, label="train")
+        plt.plot(val_f1_history, label="val")
+        plt.ylabel("f1-score")
+        plt.xlabel("epoch")
+        plt.savefig(model_save_path + ".png")
+        plt.show()
+        plt.close()
+
+        np.savez(
+            model_save_path + ".npz",
+            train_loss_history=train_loss_history,
+            train_f1_history=train_f1_history,
+            val_f1_history=val_f1_history,
+        )
+
+        gfo.model = model
+        torch.save(model.state_dict(), model_save_path + ".pth")
+        # params = gfo.get_parameters(model)
+        print("Model is saved to:", model_save_path + ".pth")
+        return model
