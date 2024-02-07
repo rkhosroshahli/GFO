@@ -50,6 +50,7 @@ def main(args):
             metric=args.metric,
             DEVICE=DEVICE,
         )
+        gfo.find_param_sizes()
 
         if args.pre_train:
             gfo.pre_train(
@@ -58,6 +59,7 @@ def main(args):
                 model_save_path=model_save_path,
             )
         model_params = gfo.get_parameters(gfo.model)
+        print(f"Model {args.model} has {len(model_params)} trainable parameters.")
 
         # blocks_path = ""
         shared_link = f"{args.dir}/{args.model}_{args.dataset}_{args.global_algo}_np{args.np}_{args.strategy}_maxFE{args.global_maxiter*args.np}"
@@ -90,7 +92,6 @@ def main(args):
             blocks_mask = block.generator(
                 gfo=gfo,
                 max_dims=args.max_dims,
-                block_size=args.block_size,
                 train_loader=train_loader,
                 test_loader=test_loader,
                 seed=seed_block,

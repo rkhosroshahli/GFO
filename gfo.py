@@ -25,14 +25,18 @@ class GradientFreeOptimization:
         #     param.requires_grad = False
         self.num_classes = num_classes
 
+        self.trainable_layer_name = ""
+
         if hasattr(self.model, "fc"):
             if self.model.fc.out_features != self.num_classes:
                 self.model.fc = nn.Linear(self.model.fc.in_features, self.num_classes)
-                # self.model.fc.weight = nn.init.normal_(
-                #     self.model.fc.weight, mean=0.0, std=0.01
-                # )
-                # self.model.fc.bias = nn.init.zeros_(self.model.fc.bias)
+            self.trainable_layer_name = "fc"
+            # self.model.fc.weight = nn.init.normal_(
+            #     self.model.fc.weight, mean=0.0, std=0.01
+            # )
+            # self.model.fc.bias = nn.init.zeros_(self.model.fc.bias)
         elif hasattr(self.model, "classifier"):
+            self.trainable_layer_name = "classifier"
             if self.model.classifier[-1].out_features != self.num_classes:
                 self.model.classifier[-1] = nn.Linear(
                     self.model.classifier[-1].in_features, self.num_classes
@@ -48,7 +52,11 @@ class GradientFreeOptimization:
     def find_param_sizes(self):
         for name, param in self.model.named_parameters():
             if param.requires_grad:
-                self.params_sizes[name] = param.size()
+                if self.trainable_layer_name in name:
+                    print(name)
+                    self.params_sizes[name] = param.size()
+                else:
+                    param.requires_grad = False
 
     def get_parameters(self, model):
         params = []
@@ -62,10 +70,13 @@ class GradientFreeOptimization:
     def set_weights(self, model_state, all_parameters):
         counted_params = 0
         for name, param in self.model.named_parameters():
-            model_state[name] = torch.tensor(
-                all_parameters[counted_params : param.size().numel() + counted_params]
-            ).reshape(param.size())
-            counted_params += param.size().numel()
+            if param.requires_grad:
+                model_state[name] = torch.tensor(
+                    all_parameters[
+                        counted_params : param.size().numel() + counted_params
+                    ]
+                ).reshape(param.size())
+                counted_params += param.size().numel()
         return model_state
 
     def score_in_optimization(self, model=None):

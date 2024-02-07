@@ -112,11 +112,13 @@ class Block:
             blocks_mask = blocks_mask.reshape((max_dims, self.block_size))
             print(np.sum(dims > blocks_mask[:, 0]))
             if np.sum(dims > blocks_mask[:, 0]) == max_dims:
-                with open(blocks_path, "wb") as f:
+                with open(self.path, "wb") as f:
                     pickle.dump(blocks_mask, f)
                 break
             tries += 1
         self.blocked_dims = max_dims
+        # with open(self.path, "wb") as f:
+        #     pickle.dump(blocks_mask, f)
         (params_unblocked,) = self.unblocker([params])
 
         print("-" * 50)
