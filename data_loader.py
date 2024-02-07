@@ -6,14 +6,16 @@ from torch.utils.data import DataLoader, Subset, RandomSampler, Sampler
 
 
 class CircularBatchSampler(Sampler):
-    def __init__(self, data_source, batch_size):
+    def __init__(self, data_source, batch_size, max_num_call):
         self.data_source = data_source
         self.batch_size = batch_size
         self.num_samples = len(data_source)
         self.super_batch_step = 0
-        self.num_calls = 100
+        self.num_calls = max_num_call
+        self.max_num_call = max_num_call
 
     def __iter__(self):
+        # np.random.randint(0, )
         indices = torch.arange(
             self.super_batch_step * self.batch_size,
             (self.super_batch_step + 1) * self.batch_size,
@@ -28,7 +30,7 @@ class CircularBatchSampler(Sampler):
         if self.num_calls == 0:
             self.super_batch_step += 1
             self.super_batch_step %= self.num_samples // self.batch_size
-            self.num_calls = 100
+            self.num_calls = self.max_num_call
 
     def __len__(self):
         return self.num_samples // self.batch_size
@@ -70,7 +72,7 @@ def load_mnist_train_fixed_selection(num_samples=100, seed=42, batch_size=64):
     return train_loader
 
 
-def load_mnist_train_each_step(num_samples=100, seed=42, batch_size=64):
+def load_mnist_train_each_step(num_samples=100, seed=42, batch_size=64, max_num_call=1):
     # Define the transformation to apply to the data
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]
@@ -81,7 +83,9 @@ def load_mnist_train_each_step(num_samples=100, seed=42, batch_size=64):
         "./data", train=True, download=True, transform=transform
     )
 
-    custom_sampler = CircularBatchSampler(train_set, batch_size=batch_size)
+    custom_sampler = CircularBatchSampler(
+        train_set, batch_size=batch_size, max_num_call=max_num_calls
+    )
 
     # Create DataLoaders for the balanced datasets
     train_loader = DataLoader(train_set, batch_sampler=custom_sampler)
@@ -175,7 +179,7 @@ def load_cifar10_train_fixed_selection(num_samples=100, seed=42, batch_size=64):
         balanced_train_dataset.extend(Subset(mnist_train, selected_indices))
 
     # Check the sizes of the resulting datasets
-    print("Size of balanced training dataset:", len(balanced_train_dataset))
+    # print("Size of balanced training dataset:", len(balanced_train_dataset))
 
     # Create DataLoaders for the balanced datasets
     train_loader = DataLoader(
@@ -188,7 +192,9 @@ def load_cifar10_train_fixed_selection(num_samples=100, seed=42, batch_size=64):
     return train_loader
 
 
-def load_cifar10_train_each_step(num_samples=100, seed=42, batch_size=64):
+def load_cifar10_train_each_step(
+    num_samples=100, seed=42, batch_size=64, max_num_call=1
+):
     # Define the transformation to apply to the data
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
@@ -199,14 +205,16 @@ def load_cifar10_train_each_step(num_samples=100, seed=42, batch_size=64):
         "./data", train=True, download=True, transform=transform
     )
 
-    custom_sampler = CircularBatchSampler(train_set, batch_size=batch_size)
+    custom_sampler = CircularBatchSampler(
+        train_set, batch_size=batch_size, max_num_call=max_num_call
+    )
 
     # Create DataLoaders for the balanced datasets
     train_loader = DataLoader(train_set, batch_sampler=custom_sampler)
     return train_loader
 
 
-def load_cifar10_train_selection(num_samples=100, seed=42, batch_size=64):
+def load_cifar10_train_selection(num_samples=100, seed=42, batch_size=64, **args):
     # Set a random seed for reproducibility
     # seed = 42
     # np.random.seed(seed)
@@ -244,7 +252,7 @@ def load_cifar10_train_full(batch_size=64):
         "./data", train=True, download=True, transform=transform
     )
 
-    print("Size of balanced training dataset:", len(train_dataset))
+    # print("Size of balanced training dataset:", len(train_dataset))
 
     train_loader = DataLoader(
         train_dataset,
@@ -266,7 +274,7 @@ def load_cifar10_test(batch_size=64):
         root="./data", train=False, transform=transform, download=True
     )
 
-    print("Size of balanced test dataset:", len(test_dataset))
+    # print("Size of balanced test dataset:", len(test_dataset))
 
     test_loader = DataLoader(
         test_dataset,
@@ -305,16 +313,18 @@ def load_cifar100_train_fixed_selection(num_samples=100, seed=42, batch_size=64)
         balanced_train_dataset.extend(Subset(mnist_train, selected_indices))
 
     # Check the sizes of the resulting datasets
-    print("Size of balanced training dataset:", len(balanced_train_dataset))
+    # print("Size of balanced training dataset:", len(balanced_train_dataset))
 
     # Create DataLoaders for the balanced datasets
     train_loader = DataLoader(
-        balanced_train_dataset, batch_size=batch_size, shuffle=True
+        balanced_train_dataset, batch_size=batch_size, shuffle=False
     )
     return train_loader
 
 
-def load_cifar100_train_each_step(num_samples=100, seed=42, batch_size=64):
+def load_cifar100_train_each_step(
+    num_samples=100, seed=42, batch_size=64, max_num_call=1
+):
     # Define the transformation to apply to the data
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
@@ -325,7 +335,9 @@ def load_cifar100_train_each_step(num_samples=100, seed=42, batch_size=64):
         "./data", train=True, download=True, transform=transform
     )
 
-    custom_sampler = CircularBatchSampler(train_set, batch_size=batch_size)
+    custom_sampler = CircularBatchSampler(
+        train_set, batch_size=batch_size, max_num_call=max_num_call
+    )
 
     # Create DataLoaders for the balanced datasets
     train_loader = DataLoader(train_set, batch_sampler=custom_sampler)
@@ -370,7 +382,7 @@ def load_cifar100_train_full(batch_size=64):
         "./data", train=True, download=True, transform=transform
     )
 
-    print("Size of balanced training dataset:", len(train_dataset))
+    # print("Size of balanced training dataset:", len(train_dataset))
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     return train_loader
@@ -386,7 +398,112 @@ def load_cifar100_test(batch_size=64):
         root="./data", train=False, transform=transform, download=True
     )
 
-    print("Size of balanced test dataset:", len(test_dataset))
+    # print("Size of balanced test dataset:", len(test_dataset))
 
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     return test_loader
+
+
+def data_loader(dataset, batch_size, sample_size, max_num_call=100, seed=None):
+    num_classes = None
+    sample_train_loader = None
+    full_train_loader = None
+    test_loader = None
+    if dataset == "mnist":
+        num_classes = 10
+        data_shape = (28, 28, 1)
+        full_train_loader = load_mnist_train_full(batch_size=batch_size)
+        sample_train_loader = load_mnist_train_each_step(
+            num_samples=sample_size,
+            seed=seed,
+            batch_size=batch_size,
+            max_num_call=max_num_call,
+        )
+        test_loader = load_mnist_test(batch_size=batch_size)
+    elif dataset == "cifar10":
+        num_classes = 10
+        data_shape = (32, 32, 3)
+        full_train_loader = load_cifar10_train_full(batch_size=batch_size)
+        sample_train_loader = load_cifar10_train_selection(
+            num_samples=sample_size,
+            seed=seed,
+            batch_size=batch_size,
+            max_num_call=max_num_call,
+        )
+        test_loader = load_cifar10_test(batch_size=batch_size)
+    elif dataset == "cifar100":
+        num_classes = 100
+        data_shape = (32, 32, 3)
+        full_train_loader = load_cifar100_train_full(batch_size=batch_size)
+        sample_train_loader = load_cifar100_train_each_step(
+            num_samples=sample_size,
+            seed=seed,
+            batch_size=batch_size,
+            max_num_call=max_num_call,
+        )
+        test_loader = load_cifar100_test(batch_size=batch_size)
+
+    return sample_train_loader, full_train_loader, test_loader, num_classes
+
+
+def data_random_each_step_sampler(
+    dataset, batch_size, sample_size=0, max_num_call=100, seed=None
+):
+    sample_train_loader = None
+    if dataset == "mnist":
+
+        sample_train_loader = load_mnist_train_each_step(
+            num_samples=sample_size,
+            seed=seed,
+            batch_size=batch_size,
+            max_num_call=max_num_call,
+        )
+
+    elif dataset == "cifar10":
+
+        sample_train_loader = load_cifar10_train_each_step(
+            num_samples=sample_size,
+            seed=seed,
+            batch_size=batch_size,
+            max_num_call=max_num_call,
+        )
+
+    elif dataset == "cifar100":
+
+        sample_train_loader = load_cifar100_train_each_step(
+            num_samples=sample_size,
+            seed=seed,
+            batch_size=batch_size,
+            max_num_call=max_num_call,
+        )
+
+    return sample_train_loader
+
+
+def data_fixed_sampler(dataset, batch_size, sample_size, seed):
+    sample_train_loader = None
+    if dataset == "mnist":
+
+        sample_train_loader = load_mnist_train_fixed_selection(
+            num_samples=sample_size,
+            seed=seed,
+            batch_size=batch_size,
+        )
+
+    elif dataset == "cifar10":
+
+        sample_train_loader = load_cifar10_train_fixed_selection(
+            num_samples=sample_size,
+            seed=seed,
+            batch_size=batch_size,
+        )
+
+    elif dataset == "cifar100":
+
+        sample_train_loader = load_cifar100_train_fixed_selection(
+            num_samples=sample_size,
+            seed=seed,
+            batch_size=batch_size,
+        )
+
+    return sample_train_loader

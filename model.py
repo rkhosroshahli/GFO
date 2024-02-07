@@ -114,3 +114,34 @@ class LeNet5(nn.Module):
         x = self.act4(self.fc2(x))
         x = self.fc3(x)
         return x
+
+
+def model_loader(arch, dataset):
+    model = None
+    weights = None
+    if arch.lower() == "ann":
+        if dataset == "mnist":
+            model = ANN1H1D
+        elif dataset == "cifar10" or dataset == "cifar100":
+            model = ANN1H3D
+        else:
+            model = ANN2H1D
+    elif arch.lower() == "resnet18":
+        from torchvision.models import resnet18
+
+        model = resnet18
+        weights = "DEFAULT"
+    elif arch.lower() == "vgg16":
+        from torchvision.models import vgg16
+
+        model = vgg16
+        weights = "DEFAULT"
+    elif arch.lower() == "lenet5":
+        if dataset == "mnist":
+            model = LeNet5V1
+        else:
+            model = LeNet5
+    else:
+        ValueError("Please enter a valid model, choose between:", ["ANN", "resnet18"])
+
+    return model, weights
