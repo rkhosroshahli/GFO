@@ -1,13 +1,8 @@
 import os
 import argparse
-<<<<<<< HEAD
 import warnings
 from matplotlib import pyplot as plt
 import numpy as np
-from sklearn.exceptions import UndefinedMetricWarning
-=======
-import numpy as np
->>>>>>> feed58546091c003099702d2bff8f00e585857db
 import torch
 
 from data_loader import *
@@ -16,13 +11,10 @@ from gfo import GradientFreeOptimization
 from block import *
 from block_differential_evolution import block_differential_evolution
 from cs import cs_3point
-<<<<<<< HEAD
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.optimize import minimize
 from pymoo.util.display.output import Output
 from pymoo.util.display.column import Column
-=======
->>>>>>> feed58546091c003099702d2bff8f00e585857db
 
 
 def main(args):
@@ -35,10 +27,6 @@ def main(args):
     sample_loader, train_loader, test_loader, num_classes = data_loader(
         args.dataset.lower(), args.batch_size, args.sample_size, seed=None
     )
-<<<<<<< HEAD
-
-=======
->>>>>>> feed58546091c003099702d2bff8f00e585857db
     model_save_path = f"output/models/{args.model}/{args.dataset}/{args.model}_{args.dataset}_epochs{args.epochs}_state_dict"
     model, weights = model_loader(arch=args.model.lower(), dataset=args.dataset.upper())
 
@@ -70,10 +58,7 @@ def main(args):
         )
 
         if args.pre_train:
-<<<<<<< HEAD
             print("Pre-train is enabled!")
-=======
->>>>>>> feed58546091c003099702d2bff8f00e585857db
             gfo.pre_train(
                 epochs=args.epochs,
                 train_loader=train_loader,
@@ -90,21 +75,13 @@ def main(args):
             scheme=args.block_scheme,
             dims=len(model_params),
             block_size=args.block_size,
-<<<<<<< HEAD
             path=f"output/blocks/classic/{args.model}_{args.dataset}_epochs{args.epochs}_{args.block_scheme.split('_')[0]}_maxD{args.max_dims}.pickle",
-=======
-            path=f"output/blocks/{args.model}_{args.dataset}_epochs{args.epochs}_{args.block_scheme}_maxD{args.max_dims}.pickle",
->>>>>>> feed58546091c003099702d2bff8f00e585857db
         )
         blocks_mask = None
         blocked_dims = None
         blocker = None
         unblocker = None
-<<<<<<< HEAD
         if "optimized" in args.block_scheme:
-=======
-        if args.block_scheme == "optimized":
->>>>>>> feed58546091c003099702d2bff8f00e585857db
             blocks_mask = block.generator(
                 max_dims=args.max_dims,
                 gfo=gfo,
@@ -114,15 +91,10 @@ def main(args):
             )
             blocker = block.blocker
             unblocker = block.unblocker
-<<<<<<< HEAD
             if "merge" in args.block_scheme:
                 print("Merging blocks with size less than 2.")
                 new_path = f"output/blocks/merged/{args.model}_{args.dataset}_epochs{args.epochs}_{args.block_scheme}_maxD{args.max_dims}.pickle"
                 blocks_mask = block.merge_blocks(blocks_mask, new_path)
-=======
-            new_path = f"output/blocks/{args.model}_{args.dataset}_epochs{args.epochs}_{args.block_scheme}_maxD{args.max_dims}_merged.pickle"
-            blocks_mask = block.merge_blocks(new_path)
->>>>>>> feed58546091c003099702d2bff8f00e585857db
         elif args.block_scheme == "randomized":
             blocks_mask = block.generator(
                 gfo=gfo,
@@ -144,11 +116,7 @@ def main(args):
         #     init_pop = block.blocker(init_pop)
         #     print("No global but local")
         if args.global_algo != "":
-<<<<<<< HEAD
             if "optimized" in args.block_scheme:
-=======
-            if args.block_scheme == "optimized":
->>>>>>> feed58546091c003099702d2bff8f00e585857db
                 init_pop = gfo.optimized_population_init(
                     args.np, blocked_dims, blocks_mask, seed=seed_pop
                 )
@@ -238,11 +206,7 @@ def main(args):
                 dataset=args.dataset.lower(),
                 batch_size=args.batch_size,
                 sample_size=args.sample_size,
-<<<<<<< HEAD
                 seed=59,
-=======
-                seed=None,
->>>>>>> feed58546091c003099702d2bff8f00e585857db
             )
 
             gfo.data_loader = sample_loader
@@ -261,11 +225,7 @@ def main(args):
             var_min = None
             var_max = None
             if init_pop == None:
-<<<<<<< HEAD
                 if "optimized" in args.block_scheme:
-=======
-                if args.block_scheme == "optimized":
->>>>>>> feed58546091c003099702d2bff8f00e585857db
                     var_min, var_max = gfo.optimized_local_search_boundaries(
                         blocked_dims, blocks_mask, seed=seed_pop
                     )
@@ -297,13 +257,10 @@ def main(args):
             local_save_link = f"{shared_link}_history_{i}"
             local_plot_link = f"{shared_link}_plot_{i}"
 
-<<<<<<< HEAD
             max_nfe = args.local_maxiter * (2 * block.blocked_dims + 1) + nfe
             if args.max_nfe:
                 max_nfe = args.max_nfe
 
-=======
->>>>>>> feed58546091c003099702d2bff8f00e585857db
             res = cs_3point(
                 fitness=gfo.fitness_func,
                 best_solution=best_solution,
@@ -313,11 +270,7 @@ def main(args):
                 var_max=var_max,
                 nit=args.local_maxiter,
                 nfe=nfe,
-<<<<<<< HEAD
                 max_nfe=max_nfe,
-=======
-                max_nfe=args.local_maxiter * (2 * block.blocked_dims + 1) + nfe,
->>>>>>> feed58546091c003099702d2bff8f00e585857db
                 block=block,
                 plot_link=local_plot_link,
                 history_link=local_save_link,
@@ -326,7 +279,6 @@ def main(args):
         else:
             print("Local search is skipped.")
 
-<<<<<<< HEAD
         if args.moo_algo == "nsga2" and args.moo_maxiter > 0:
             sample_loader = data_fixed_sampler(
                 dataset=args.dataset.lower(),
@@ -440,8 +392,6 @@ def main(args):
 
             np.savez(moo_save_link, pareto_front=X, fitness_history=hist_F)
 
-=======
->>>>>>> feed58546091c003099702d2bff8f00e585857db
 
 if __name__ == "__main__":
     # --------------------------------------------------
@@ -515,7 +465,6 @@ if __name__ == "__main__":
         "--local-maxiter", type=int, default=0, help="Max number of iterations"
     )
 
-<<<<<<< HEAD
     parser.add_argument("--moo-algo", type=str, default="", help="Optimization methods")
 
     parser.add_argument(
@@ -526,11 +475,6 @@ if __name__ == "__main__":
         "--block-scheme", type=str, default="random", help="A hyper-paramater in BDE"
     )
 
-=======
-    parser.add_argument(
-        "--block-scheme", type=str, default="random", help="A hyper-paramater in BDE"
-    )
->>>>>>> feed58546091c003099702d2bff8f00e585857db
     parser.add_argument(
         "--block-size", type=int, default=10, help="Expected dimensions"
     )
@@ -538,13 +482,10 @@ if __name__ == "__main__":
         "--max-dims", type=int, default=10000, help="Expected dimensions"
     )
 
-<<<<<<< HEAD
     parser.add_argument(
         "--max-nfe", type=int, default=100000, help="Expected dimensions"
     )
 
-=======
->>>>>>> feed58546091c003099702d2bff8f00e585857db
     # dir
     parser.add_argument("--dir", type=str, default="./output/", help="Output directory")
     # parser.add_argument('--model-dir', type=str, default='./models/', help='Save directory')

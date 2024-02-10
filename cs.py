@@ -35,11 +35,8 @@ def cs_3point(
             f"Adam blocked, f(x)= {best_fitness:.4f}, 1-f(x)= {(1-best_fitness):.4f}, g(x)={val_f1:.4f}",
         )
 
-<<<<<<< HEAD
     nfe += 1
 
-=======
->>>>>>> feed58546091c003099702d2bff8f00e585857db
     iteration_col = []
     dims_col = []
     error_col = []
@@ -141,10 +138,7 @@ def cs_3point(
                 np.savez(
                     history_link,
                     fitness_history=fitness_history,
-<<<<<<< HEAD
                     best_solution=best_solution,
-=======
->>>>>>> feed58546091c003099702d2bff8f00e585857db
                     var_min=var_min,
                     var_max=var_max,
                 )
@@ -171,10 +165,7 @@ def cs_3point(
         np.savez(
             history_link,
             fitness_history=fitness_history,
-<<<<<<< HEAD
             best_solution=best_solution,
-=======
->>>>>>> feed58546091c003099702d2bff8f00e585857db
             var_min=var_min,
             var_max=var_max,
         )
