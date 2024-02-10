@@ -1,9 +1,18 @@
 import os
 import time
+import warnings
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.metrics import f1_score
+from sklearn.metrics import (
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+    top_k_accuracy_score,
+)
+from imblearn.metrics import specificity_score
+from pymoo.core.problem import Problem
 
 
 class GradientFreeOptimization:
@@ -74,8 +83,6 @@ class GradientFreeOptimization:
 
         true_labels = []
         predicted_labels = []
-        correct_1 = 0.0
-        correct_5 = 0.0
 
         with torch.no_grad():
             for batch_idx, (data, label) in enumerate(self.data_loader):
@@ -90,40 +97,105 @@ class GradientFreeOptimization:
                 true_labels.extend(label.tolist())
                 predicted_labels.extend(pred.tolist())
 
-                _, top5pred = output.topk(5, 1, largest=True, sorted=True)
-
-                label = label.view(label.size(0), -1).expand_as(top5pred)
-                correct = top5pred.eq(label).float()
-
-                # compute top 5
-                correct_5 += correct[:, :5].sum()
-
-                # compute top1
-                correct_1 += correct[:, :1].sum()
-
         score = 0
         if self.metric == "f1":
             score = f1_score(true_labels, predicted_labels, average="macro")
         elif self.metric == "top1":
-            score = correct_1 / len(self.data_loader.dataset)
+            score = top_k_accuracy_score(true_labels, predicted_labels, k=1)
         elif self.metric == "top5":
-            score = correct_5 / len(self.data_loader.dataset)
+            score = top_k_accuracy_score(true_labels, predicted_labels, k=5)
         return score
 
     def fitness_func(self, parameters):
         if len(parameters) != len(self.get_parameters(self.model)):
             error_msg = f"Not matched sizes of parameters, given parameters length: {len(parameters)}, model parameters length: {len(self.get_parameters(self.model))}"
             raise Exception(error_msg)
-        start_time = time.time()
+        # start_time = time.time()
         self.model.load_state_dict(
             self.set_weights(self.model.state_dict(), parameters)
         )
-        end_time = time.time()
+        # end_time = time.time()
         # print(end_time-start_time)
         self.model.to(self.DEVICE)
         self.model.eval()
         fitness = 1 - self.score_in_optimization()
         return fitness
+
+    def moo_objective_func(self, dims, block):
+        class PercisionRecall(Problem):
+            def __init__(self, n_var=1, gfo=None, block=None):
+                super().__init__(
+                    n_var=n_var, n_obj=2, n_ieq_constr=0, xl=-3.0, xu=3.0, vtype=float
+                )
+                self.gfo = gfo
+                self.block = block
+
+            def _calc_pareto_front(self, n_pareto_points=100):
+                x = np.linspace(0, 1, n_pareto_points)
+                return np.array([x, 1 - np.power(x, 2)]).T
+
+            def _evaluate(self, x, out, *args, **kwargs):
+                # Handle the warning
+                # warnings.filterwarnings("ignore")
+                NP = x.shape[0]
+                ux = self.block.unblocker(x)
+                # print(ux[:, 10])
+                f1 = np.zeros(NP)
+                f2 = np.zeros(NP)
+                f3 = np.zeros(NP)
+                fn = np.zeros(NP)
+                for i in range(NP):
+                    param = ux[i]
+                    self.gfo.model.load_state_dict(
+                        self.gfo.set_weights(self.gfo.model.state_dict(), param)
+                    )
+                    self.gfo.model.to(self.gfo.DEVICE)
+                    self.gfo.model.eval()
+
+                    # predicted_probs = []
+                    predicted_labels = []
+                    true_labels = []
+                    with torch.no_grad():
+                        for data, label in self.gfo.data_loader:
+                            data, label = data.to(self.gfo.DEVICE), label.to(
+                                self.gfo.DEVICE
+                            )
+                            output = self.gfo.model(data)
+                            # loss = criterion(output, label)
+                            # running_loss += loss.item()
+                            # out = nn.functional.softmax(output, dim=1)
+                            # predicted_probs.extend(nn.functional.softmax(output, dim=1))
+                            _, pred = torch.max(output, dim=1)
+
+                            true_labels.extend(label.cpu().numpy())
+                            predicted_labels.extend(pred.cpu().numpy())
+
+                    # Convert lists to numpy arrays
+                    predictions = np.array(predicted_labels)
+                    targets = np.array(true_labels)
+                    # print(predictions.shape)
+
+                    # Compute precision and recall
+                    precision = precision_score(targets, predictions, average="macro")
+                    recall = recall_score(targets, predictions, average="macro")
+                    # roc = roc_auc_score(
+                    #     targets, predictions, average="macro", multi_class="ovo"
+                    # )
+                    specifity = specificity_score(targets, predictions, average="macro")
+                    score = f1_score(targets, predictions, average="macro")
+
+                    f1[i] = precision
+                    f2[i] = recall
+                    f3[i] = specifity
+                    fn[i] = score
+                argbs = np.argmax(fn)
+                print(
+                    f"Precision (f1)={f1[argbs]:.6f}, Recall (f2)={f2[argbs]:.6f}, Specifity={f3[argbs]:.6f}, F1-score={fn[argbs]:.6f}, Test F1-score={self.gfo.evaluate_params(ux[argbs], self.gfo.val_loader):.6f}"
+                )
+                out["F"] = np.column_stack([1 - f1, 1 - f2])  # , 1 - f3])
+
+        pr = PercisionRecall(n_var=dims, gfo=self, block=block)
+        return pr
 
     def validation_func(self, parameters):
         if len(parameters) != len(self.get_parameters(self.model)):
@@ -152,8 +224,6 @@ class GradientFreeOptimization:
 
         true_labels = []
         predicted_labels = []
-        correct_1 = 0.0
-        correct_5 = 0.0
 
         with torch.no_grad():
             for batch_idx, (data, label) in enumerate(data_loader):
@@ -161,30 +231,19 @@ class GradientFreeOptimization:
                 output = model(data)
                 # loss = criterion(output, label)
                 # running_loss += loss.item()
-                out = nn.functional.softmax(output, dim=1)
-                _, pred = torch.max(out, dim=1)
+                # out = nn.functional.softmax(output, dim=1)
+                _, pred = torch.max(output, dim=1)
 
                 true_labels.extend(label.tolist())
                 predicted_labels.extend(pred.tolist())
-
-                _, top5pred = output.topk(5, 1, largest=True, sorted=True)
-
-                label = label.view(label.size(0), -1).expand_as(top5pred)
-                correct = top5pred.eq(label).float()
-
-                # compute top 5
-                correct_5 += correct[:, :5].sum()
-
-                # compute top1
-                correct_1 += correct[:, :1].sum()
 
         score = 0
         if metric == "f1":
             score = f1_score(true_labels, predicted_labels, average="macro")
         elif metric == "top1":
-            score = correct_1.cpu().numpy() / len(data_loader.dataset)
+            score = top_k_accuracy_score(true_labels, predicted_labels, k=1)
         elif metric == "top5":
-            score = correct_5.cpu().numpy() / len(data_loader.dataset)
+            score = top_k_accuracy_score(true_labels, predicted_labels, k=5)
         return score
 
     def random_population_init(self, popsize, seed=42):
@@ -326,7 +385,7 @@ class GradientFreeOptimization:
             val_f1_history=val_f1_history,
         )
 
-        gfo.model = model
+        self.model = model
         torch.save(model.state_dict(), model_save_path + ".pth")
         # params = gfo.get_parameters(model)
         print("Model is saved to:", model_save_path + ".pth")

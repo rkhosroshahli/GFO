@@ -1,6 +1,9 @@
 import os
 import argparse
+import warnings
+from matplotlib import pyplot as plt
 import numpy as np
+from sklearn.exceptions import UndefinedMetricWarning
 import torch
 
 from data_loader import *
@@ -9,6 +12,10 @@ from gfo import GradientFreeOptimization
 from block import *
 from block_differential_evolution import block_differential_evolution
 from cs import cs_3point
+from pymoo.algorithms.moo.nsga2 import NSGA2
+from pymoo.optimize import minimize
+from pymoo.util.display.output import Output
+from pymoo.util.display.column import Column
 
 
 def main(args):
@@ -21,6 +28,7 @@ def main(args):
     sample_loader, train_loader, test_loader, num_classes = data_loader(
         args.dataset.lower(), args.batch_size, args.sample_size, seed=None
     )
+
     model_save_path = f"output/models/{args.model}/{args.dataset}/{args.model}_{args.dataset}_epochs{args.epochs}_state_dict"
     model, weights = model_loader(arch=args.model.lower(), dataset=args.dataset.upper())
 
@@ -52,6 +60,7 @@ def main(args):
         )
 
         if args.pre_train:
+            print("Pre-train is enabled!")
             gfo.pre_train(
                 epochs=args.epochs,
                 train_loader=train_loader,
@@ -68,13 +77,13 @@ def main(args):
             scheme=args.block_scheme,
             dims=len(model_params),
             block_size=args.block_size,
-            path=f"output/blocks/{args.model}_{args.dataset}_epochs{args.epochs}_{args.block_scheme}_maxD{args.max_dims}.pickle",
+            path=f"output/blocks/classic/{args.model}_{args.dataset}_epochs{args.epochs}_{args.block_scheme.split('_')[0]}_maxD{args.max_dims}.pickle",
         )
         blocks_mask = None
         blocked_dims = None
         blocker = None
         unblocker = None
-        if args.block_scheme == "optimized":
+        if "optimized" in args.block_scheme:
             blocks_mask = block.generator(
                 max_dims=args.max_dims,
                 gfo=gfo,
@@ -84,8 +93,10 @@ def main(args):
             )
             blocker = block.blocker
             unblocker = block.unblocker
-            new_path = f"output/blocks/{args.model}_{args.dataset}_epochs{args.epochs}_{args.block_scheme}_maxD{args.max_dims}_merged.pickle"
-            blocks_mask = block.merge_blocks(new_path)
+            if "merge" in args.block_scheme:
+                print("Merging blocks with size less than 2.")
+                new_path = f"output/blocks/merged/{args.model}_{args.dataset}_epochs{args.epochs}_{args.block_scheme}_maxD{args.max_dims}.pickle"
+                blocks_mask = block.merge_blocks(blocks_mask, new_path)
         elif args.block_scheme == "randomized":
             blocks_mask = block.generator(
                 gfo=gfo,
@@ -107,7 +118,7 @@ def main(args):
         #     init_pop = block.blocker(init_pop)
         #     print("No global but local")
         if args.global_algo != "":
-            if args.block_scheme == "optimized":
+            if "optimized" in args.block_scheme:
                 init_pop = gfo.optimized_population_init(
                     args.np, blocked_dims, blocks_mask, seed=seed_pop
                 )
@@ -197,7 +208,7 @@ def main(args):
                 dataset=args.dataset.lower(),
                 batch_size=args.batch_size,
                 sample_size=args.sample_size,
-                seed=None,
+                seed=59,
             )
 
             gfo.data_loader = sample_loader
@@ -216,7 +227,7 @@ def main(args):
             var_min = None
             var_max = None
             if init_pop == None:
-                if args.block_scheme == "optimized":
+                if "optimized" in args.block_scheme:
                     var_min, var_max = gfo.optimized_local_search_boundaries(
                         blocked_dims, blocks_mask, seed=seed_pop
                     )
@@ -248,6 +259,10 @@ def main(args):
             local_save_link = f"{shared_link}_history_{i}"
             local_plot_link = f"{shared_link}_plot_{i}"
 
+            max_nfe = args.local_maxiter * (2 * block.blocked_dims + 1) + nfe
+            if args.max_nfe:
+                max_nfe = args.max_nfe
+
             res = cs_3point(
                 fitness=gfo.fitness_func,
                 best_solution=best_solution,
@@ -257,7 +272,7 @@ def main(args):
                 var_max=var_max,
                 nit=args.local_maxiter,
                 nfe=nfe,
-                max_nfe=args.local_maxiter * (2 * block.blocked_dims + 1) + nfe,
+                max_nfe=max_nfe,
                 block=block,
                 plot_link=local_plot_link,
                 history_link=local_save_link,
@@ -265,6 +280,119 @@ def main(args):
             )
         else:
             print("Local search is skipped.")
+
+        if args.moo_algo == "nsga2" and args.moo_maxiter > 0:
+            sample_loader = data_fixed_sampler(
+                dataset=args.dataset.lower(),
+                batch_size=args.batch_size,
+                sample_size=args.sample_size,
+                seed=59,
+            )
+            gfo.data_loader = sample_loader
+
+            if "optimized" in args.block_scheme:
+                init_pop = gfo.optimized_population_init(
+                    args.np, blocked_dims, blocks_mask, seed=seed_pop
+                )
+            elif args.block_scheme == "randomized":
+                init_pop = gfo.random_population_init(popsize=args.np, seed=seed_pop)
+
+            init_pop[0] = block.blocker(np.array([model_params]))
+
+            problem = gfo.moo_objective_func(dims=np.size(init_pop, 1), block=block)
+
+            algorithm = NSGA2(pop_size=args.np, sampling=init_pop)
+
+            class MyOutput(Output):
+                def __init__(self):
+                    super().__init__()
+                    self.precision = Column("Precision", width=13)
+                    self.recall = Column("Recall", width=13)
+                    self.columns += [self.precision, self.recall]
+
+                def update(self, algorithm):
+                    super().update(algorithm)
+                    self.precision.set(np.mean(algorithm.pop.get("F")))
+                    self.recall.set(np.std(algorithm.pop.get("F")))
+
+            # Handle the warning
+            warnings.filterwarnings("ignore")
+            res = minimize(
+                problem,
+                algorithm,
+                ("n_gen", args.moo_maxiter),
+                seed=1,
+                verbose=True,
+                save_history=True,  # output=MyOutput(),
+            )
+
+            shared_link = f"{args.dir}/{args.model}_{args.dataset}_{args.moo_algo}_maxiter{args.moo_maxiter}"
+            moo_save_link = f"{shared_link}_history_{i}"
+            moo_plot_link = f"{shared_link}_plot_{i}"
+
+            # import dill
+            # with open(moo_save_link, "wb") as f:
+            #     dill.dump(res.history, f)
+
+            X, F = res.opt.get("X", "F")
+
+            n_evals = []  # corresponding number of function evaluations
+            hist_F = []  # the objective space values in each generation
+
+            for algo in res.history:
+                # store the number of function evaluations
+                n_evals.append(algo.evaluator.n_eval)
+                # retrieve the optimum from the algorithm
+                hist_F.append(algo.opt.get("F"))
+
+            approx_ideal = F.min(axis=0)
+            approx_nadir = F.max(axis=0)
+
+            from pymoo.indicators.hv import Hypervolume
+
+            metric = Hypervolume(
+                ref_point=np.array([1.0, 1.0]),
+                norm_ref_point=False,
+                zero_to_one=True,
+                ideal=approx_ideal,
+                nadir=approx_nadir,
+            )
+
+            hv = [metric.do(_F) for _F in hist_F]
+
+            plt.figure(figsize=(7, 5))
+            plt.plot(n_evals, hv, color="black", lw=0.7, label="Block NSGA2")
+            plt.scatter(n_evals, hv, facecolor="none", edgecolor="black", marker="p")
+            plt.title(shared_link)
+            plt.xlabel("FEs")
+            plt.ylabel("Hypervolume (HV)")
+            plt.legend()
+            plt.savefig(moo_plot_link + "_hv.png")
+            plt.show()
+
+            plt.figure(figsize=(7, 5))
+            plt.scatter(
+                res.pop.get("F")[:, 0],
+                res.pop.get("F")[:, 1],
+                color="black",
+                label="Population",
+            )
+            plt.scatter(
+                F[:, 0],
+                F[:, 1],
+                facecolor="none",
+                edgecolor="red",
+                marker="p",
+                label="Pareto Front",
+            )
+            plt.title(shared_link)
+            plt.xlabel("Recall")
+            plt.ylabel("Precision")
+            plt.legend()
+            plt.savefig(moo_plot_link + "_paretofront.png")
+            plt.show()
+
+            np.savez(moo_save_link, pareto_front=X, fitness_history=hist_F)
 
 
 if __name__ == "__main__":
@@ -339,14 +467,25 @@ if __name__ == "__main__":
         "--local-maxiter", type=int, default=0, help="Max number of iterations"
     )
 
+    parser.add_argument("--moo-algo", type=str, default="", help="Optimization methods")
+
+    parser.add_argument(
+        "--moo-maxiter", type=int, default=0, help="Max number of iterations"
+    )
+
     parser.add_argument(
         "--block-scheme", type=str, default="random", help="A hyper-paramater in BDE"
     )
+
     parser.add_argument(
         "--block-size", type=int, default=10, help="Expected dimensions"
     )
     parser.add_argument(
         "--max-dims", type=int, default=10000, help="Expected dimensions"
+    )
+
+    parser.add_argument(
+        "--max-nfe", type=int, default=100000, help="Expected dimensions"
     )
 
     # dir

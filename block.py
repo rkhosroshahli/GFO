@@ -4,16 +4,16 @@ import pickle
 
 
 class Block:
-    def __init__(self, scheme, dims, block_size, path):
+    def __init__(self, scheme, dims, path, block_size=None, blocked_dims=None):
         self.scheme = scheme
         self.blocker = None
         self.unblocker = None
         self.generator = None
-        if scheme == "optimized":
+        if "optimized" in scheme:
             self.blocker = self.optimized_blocker
             self.unblocker = self.optimized_unblocker
             self.generator = self.optimized_block_generator
-        elif scheme == "randomized":
+        elif "randomized" in scheme:
             self.blocker = self.randomized_blocker
             self.unblocker = self.randomized_unblocker
             self.generator = self.randomized_block_generator
@@ -24,7 +24,7 @@ class Block:
 
         self.path = path
         self.dims = dims
-        self.blocked_dims = None
+        self.blocked_dims = blocked_dims
         self.block_size = block_size
 
     def load_mask(self):
@@ -173,12 +173,21 @@ class Block:
 
         return params_blocked
 
-    def merge_blocks(self, new_path, gfo=None):
-        if os.path.exists(self.path):
+    def merge_blocks(self, blocks_mask, new_path, gfo=None):
+        if os.path.exists(new_path):
+            self.path = new_path
             blocks_mask = self.load_mask()
             new_blocked_dims = len(blocks_mask)
-            print("Optimized blocked dimensions:", new_blocked_dims)
+            print("Optimized and merged blocked dimensions:", new_blocked_dims)
             self.blocked_dims = new_blocked_dims
+            return blocks_mask
+
+        # if os.path.exists(self.path):
+        #     blocks_mask = self.load_mask()
+        #     new_blocked_dims = len(blocks_mask)
+        #     print("Optimized and merged blocked dimensions:", new_blocked_dims)
+        #     self.blocked_dims = new_blocked_dims
+        #     return blocks_mask
 
         # params = gfo.get_parameters(gfo.model)
 
