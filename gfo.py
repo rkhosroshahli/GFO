@@ -231,8 +231,13 @@ class GradientFreeOptimization:
                 output = model(data)
                 # loss = criterion(output, label)
                 # running_loss += loss.item()
+<<<<<<< HEAD
                 # out = nn.functional.softmax(output, dim=1)
                 _, pred = torch.max(output, dim=1)
+=======
+                out = nn.functional.softmax(output, dim=1)
+                _, pred = torch.max(out, dim=1)
+>>>>>>> feed58546091c003099702d2bff8f00e585857db
 
                 true_labels.extend(label.tolist())
                 predicted_labels.extend(pred.tolist())
@@ -385,7 +390,11 @@ class GradientFreeOptimization:
             val_f1_history=val_f1_history,
         )
 
+<<<<<<< HEAD
         self.model = model
+=======
+        gfo.model = model
+>>>>>>> feed58546091c003099702d2bff8f00e585857db
         torch.save(model.state_dict(), model_save_path + ".pth")
         # params = gfo.get_parameters(model)
         print("Model is saved to:", model_save_path + ".pth")

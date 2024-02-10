@@ -4,16 +4,28 @@ import pickle
 
 
 class Block:
+<<<<<<< HEAD
     def __init__(self, scheme, dims, path, block_size=None, blocked_dims=None):
+=======
+    def __init__(self, scheme, dims, block_size, path):
+>>>>>>> feed58546091c003099702d2bff8f00e585857db
         self.scheme = scheme
         self.blocker = None
         self.unblocker = None
         self.generator = None
+<<<<<<< HEAD
         if "optimized" in scheme:
             self.blocker = self.optimized_blocker
             self.unblocker = self.optimized_unblocker
             self.generator = self.optimized_block_generator
         elif "randomized" in scheme:
+=======
+        if scheme == "optimized":
+            self.blocker = self.optimized_blocker
+            self.unblocker = self.optimized_unblocker
+            self.generator = self.optimized_block_generator
+        elif scheme == "randomized":
+>>>>>>> feed58546091c003099702d2bff8f00e585857db
             self.blocker = self.randomized_blocker
             self.unblocker = self.randomized_unblocker
             self.generator = self.randomized_block_generator
@@ -24,7 +36,11 @@ class Block:
 
         self.path = path
         self.dims = dims
+<<<<<<< HEAD
         self.blocked_dims = blocked_dims
+=======
+        self.blocked_dims = None
+>>>>>>> feed58546091c003099702d2bff8f00e585857db
         self.block_size = block_size
 
     def load_mask(self):
@@ -173,6 +189,7 @@ class Block:
 
         return params_blocked
 
+<<<<<<< HEAD
     def merge_blocks(self, blocks_mask, new_path, gfo=None):
         if os.path.exists(new_path):
             self.path = new_path
@@ -188,6 +205,14 @@ class Block:
         #     print("Optimized and merged blocked dimensions:", new_blocked_dims)
         #     self.blocked_dims = new_blocked_dims
         #     return blocks_mask
+=======
+    def merge_blocks(self, new_path, gfo=None):
+        if os.path.exists(self.path):
+            blocks_mask = self.load_mask()
+            new_blocked_dims = len(blocks_mask)
+            print("Optimized blocked dimensions:", new_blocked_dims)
+            self.blocked_dims = new_blocked_dims
+>>>>>>> feed58546091c003099702d2bff8f00e585857db
 
         # params = gfo.get_parameters(gfo.model)
 

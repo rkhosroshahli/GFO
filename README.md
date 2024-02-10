@@ -1,1 +1,1 @@
-# gradfree-ann
+# Gradient-Free Optimization for DNNs
