@@ -68,16 +68,16 @@ class Block:
 
         print("-" * 50)
         print("Optimized by Adam:")
-        f1_train = gfo.evaluate_params(params, train_loader)
-        print(f"Training data f1-score {f1_train:.4f}%")
-        f1_test = gfo.evaluate_params(params, test_loader)
-        print(f"Test data f1-score {f1_test:.4f}%")
+        f1_train = gfo.evaluate_params(params, train_loader, model=gfo.model)
+        print(f"Training data f1-score {f1_train:.4f}")
+        f1_test = gfo.evaluate_params(params, test_loader, model=gfo.model)
+        print(f"Test data f1-score {f1_test:.4f}")
 
         print("After blocking and unblocking...")
-        f1_train = gfo.evaluate_params(params_unblocked, train_loader)
-        print(f"Training data f1-score {f1_train:.4f}%")
-        f1_test = gfo.evaluate_params(params_unblocked, test_loader)
-        print(f"Test data f1-score {f1_test:.4f}%")
+        f1_train = gfo.evaluate_params(params_unblocked, train_loader, model=gfo.model)
+        print(f"Training data f1-score {f1_train:.4f}")
+        f1_test = gfo.evaluate_params(params_unblocked, test_loader, model=gfo.model)
+        print(f"Test data f1-score {f1_test:.4f}")
         print("-" * 50)
 
         return blocks_mask
@@ -122,15 +122,15 @@ class Block:
         print("-" * 50)
         print("Optimized by Adam:")
         f1_train = gfo.evaluate_params(params, train_loader)
-        print(f"Training data f1-score {f1_train:.4f}%")
+        print(f"Training data f1-score {f1_train:.4f}")
         f1_test = gfo.evaluate_params(params, test_loader)
-        print(f"Test data f1-score {f1_test:.4f}%")
+        print(f"Test data f1-score {f1_test:.4f}")
 
         print("After blocking and unblocking...")
         f1_train = gfo.evaluate_params(params_unblocked, train_loader)
         print(f"Training data f1-score {f1_train:.4f}%")
         f1_test = gfo.evaluate_params(params_unblocked, test_loader)
-        print(f"Test data f1-score {f1_test:.4f}%")
+        print(f"Test data f1-score {f1_test:.4f}")
         print("-" * 50)
 
         return blocks_mask

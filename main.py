@@ -55,6 +55,7 @@ def main(args):
             val_loader=test_loader,
             metric=args.metric,
             DEVICE=DEVICE,
+            model_save_path=model_save_path,
         )
 
         if args.pre_train:
@@ -288,6 +289,40 @@ def main(args):
             )
             gfo.data_loader = sample_loader
 
+            gb_bs = model_params
+            gb_f1 = gfo.evaluate_params(gb_bs, data_loader=sample_loader, metric="f1")
+            gb_precision = gfo.evaluate_params(
+                gb_bs, data_loader=sample_loader, metric="precision"
+            )
+            gb_recall = gfo.evaluate_params(
+                gb_bs, data_loader=sample_loader, metric="recall"
+            )
+            gb_val_f1 = gfo.validation_func(gb_bs)
+            print(
+                f"Adam, Precision (f1)={gb_precision:.6f}, Recall (f2)={gb_recall:.6f}, F1-score={gb_f1:.6f}, Test F1-score={gb_val_f1:.6f}"
+            )
+
+            if block and len(best_solution) == block.dims:
+                (best_solution,) = block.blocker(np.array([model_params]))
+                dimensions = len(best_solution)
+
+                (ubs,) = block.unblocker(np.array([best_solution]))
+                gb_bs = ubs
+
+                gb_f1 = gfo.evaluate_params(
+                    gb_bs, data_loader=sample_loader, metric="f1"
+                )
+                gb_precision = gfo.evaluate_params(
+                    gb_bs, data_loader=sample_loader, metric="precision"
+                )
+                gb_recall = gfo.evaluate_params(
+                    gb_bs, data_loader=sample_loader, metric="recall"
+                )
+                gb_val_f1 = gfo.validation_func(gb_bs)
+                print(
+                    f"Adam Blocked, Precision (f1)={gb_precision:.6f}, Recall (f2)={gb_recall:.6f}, F1-score={gb_f1:.6f}, Test F1-score={gb_val_f1:.6f}"
+                )
+
             if "optimized" in args.block_scheme:
                 init_pop = gfo.optimized_population_init(
                     args.np, blocked_dims, blocks_mask, seed=seed_pop
@@ -299,7 +334,9 @@ def main(args):
 
             problem = gfo.moo_objective_func(dims=np.size(init_pop, 1), block=block)
 
-            algorithm = NSGA2(pop_size=args.np, sampling=init_pop)
+            algorithm = NSGA2(
+                pop_size=args.np, sampling=init_pop, eliminate_duplicates=False
+            )
 
             class MyOutput(Output):
                 def __init__(self):
@@ -325,23 +362,21 @@ def main(args):
             )
 
             shared_link = f"{args.dir}/{args.model}_{args.dataset}_{args.moo_algo}_maxiter{args.moo_maxiter}"
-            moo_save_link = f"{shared_link}_history_{i}"
-            moo_plot_link = f"{shared_link}_plot_{i}"
 
-            # import dill
-            # with open(moo_save_link, "wb") as f:
-            #     dill.dump(res.history, f)
+            moo_plot_link = f"{shared_link}_plot_{i}"
 
             X, F = res.opt.get("X", "F")
 
             n_evals = []  # corresponding number of function evaluations
-            hist_F = []  # the objective space values in each generation
+            hist_opt_F = []  # the objective space values in each generation
+            hist_pop_F = []  # the objective space values in each generation
 
             for algo in res.history:
                 # store the number of function evaluations
                 n_evals.append(algo.evaluator.n_eval)
                 # retrieve the optimum from the algorithm
-                hist_F.append(algo.opt.get("F"))
+                hist_opt_F.append(algo.opt.get("F"))
+                hist_pop_F.append(algo.pop.get("F"))
 
             approx_ideal = F.min(axis=0)
             approx_nadir = F.max(axis=0)
@@ -356,41 +391,67 @@ def main(args):
                 nadir=approx_nadir,
             )
 
-            hv = [metric.do(_F) for _F in hist_F]
+            hv = [metric.do(_F) for _F in hist_opt_F]
 
-            plt.figure(figsize=(7, 5))
-            plt.plot(n_evals, hv, color="black", lw=0.7, label="Block NSGA2")
+            plt.figure(figsize=(12, 5))
+            algo_label = f"{args.moo_algo}"
+            if args.block_scheme:
+                algo_label = "MHB" + algo_label
+            plt.plot(n_evals, hv, color="black", lw=0.7, label=algo_label)
             plt.scatter(n_evals, hv, facecolor="none", edgecolor="black", marker="p")
-            plt.title(shared_link)
+            # plt.title(shared_link)
             plt.xlabel("FEs")
             plt.ylabel("Hypervolume (HV)")
             plt.legend()
             plt.savefig(moo_plot_link + "_hv.png")
             plt.show()
 
-            plt.figure(figsize=(7, 5))
+            plt.figure(figsize=(12, 5))
             plt.scatter(
-                res.pop.get("F")[:, 0],
-                res.pop.get("F")[:, 1],
-                color="black",
+                1 - res.pop.get("F")[:, 0],
+                1 - res.pop.get("F")[:, 1],
+                # color="black",
                 label="Population",
+                facecolor="none",
+                edgecolor="black",
+                marker="s",
+                s=45,
             )
             plt.scatter(
-                F[:, 0],
-                F[:, 1],
-                facecolor="none",
-                edgecolor="red",
-                marker="p",
+                1 - F[:, 0],
+                1 - F[:, 1],
+                color="red",
                 label="Pareto Front",
+                s=20,
             )
-            plt.title(shared_link)
+            plt.scatter(
+                gb_precision,
+                gb_recall,
+                color="blue",
+                label="Adam",
+                s=20,
+            )
+            # plt.title(shared_link)
             plt.xlabel("Recall")
             plt.ylabel("Precision")
             plt.legend()
             plt.savefig(moo_plot_link + "_paretofront.png")
             plt.show()
 
-            np.savez(moo_save_link, pareto_front=X, fitness_history=hist_F)
+            # moo_save_link = f"{shared_link}_history_{i}"
+            np.savez(f"{shared_link}_pf_{i}", X=X, F=F)
+
+            import pickle
+
+            with open(f"{shared_link}_pop_history_{i}.pickle", "wb") as f:
+                pickle.dump(hist_pop_F, f)
+
+            with open(f"{shared_link}_pf_history_{i}.pickle", "wb") as f:
+                pickle.dump(hist_opt_F, f)
+
+            # import dill
+            # with open(moo_save_link, "wb") as f:
+            #     dill.dump(res.history, f)
 
 
 if __name__ == "__main__":

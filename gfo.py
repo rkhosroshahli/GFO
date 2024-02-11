@@ -26,6 +26,7 @@ class GradientFreeOptimization:
         val_loader=None,
         metric="f1",
         DEVICE="cuda",
+        model_save_path=None,
     ):
         self.DEVICE = DEVICE
         self.network = neural_network
@@ -53,6 +54,7 @@ class GradientFreeOptimization:
         self.val_loader = val_loader
         self.metric = metric.lower()
         self.params_sizes = {}
+        self.model_save_path = model_save_path
 
     def find_param_sizes(self):
         for name, param in self.model.named_parameters():
@@ -169,6 +171,9 @@ class GradientFreeOptimization:
 
                             true_labels.extend(label.cpu().numpy())
                             predicted_labels.extend(pred.cpu().numpy())
+                            del output
+                            del pred
+                            del _
 
                     # Convert lists to numpy arrays
                     predictions = np.array(predicted_labels)
@@ -237,9 +242,17 @@ class GradientFreeOptimization:
                 true_labels.extend(label.tolist())
                 predicted_labels.extend(pred.tolist())
 
+                del output
+                del pred
+                del _
+
         score = 0
         if metric == "f1":
             score = f1_score(true_labels, predicted_labels, average="macro")
+        elif metric == "precision":
+            score = precision_score(true_labels, predicted_labels, average="macro")
+        elif metric == "recall":
+            score = recall_score(true_labels, predicted_labels, average="macro")
         elif metric == "top1":
             score = top_k_accuracy_score(true_labels, predicted_labels, k=1)
         elif metric == "top5":
@@ -272,13 +285,14 @@ class GradientFreeOptimization:
         self, popsize, blocked_dimensions, blocks_mask, seed=42
     ):
         rng = np.random.default_rng(seed)
-        params = self.get_parameters(self.model)
+        params = self.get_parameters(self.load_model_from_path(self.model_save_path))
 
         initial_population = []
         for i in range(popsize):
             params_blocked = np.zeros((blocked_dimensions))
             for i in range(blocked_dimensions):
                 block_params = params[blocks_mask[i]]
+                # print(block_params.min(), block_params.max())
                 if len(block_params) != 0:
                     params_blocked[i] = rng.uniform(
                         low=block_params.min(), high=block_params.max()
@@ -291,7 +305,7 @@ class GradientFreeOptimization:
         self, blocked_dimensions, blocks_mask, seed=42
     ):
         rng = np.random.default_rng(seed)
-        params = self.get_parameters(self.model)
+        params = self.get_parameters(self.load_model_from_path(self.model_save_path))
 
         var_min = np.zeros((blocked_dimensions))
         var_max = np.zeros((blocked_dimensions))
@@ -308,6 +322,14 @@ class GradientFreeOptimization:
 
         return var_min, var_max
 
+    def load_model_from_path(self, model_save_path, model=None):
+        if model == None:
+            model = self.model
+        model.load_state_dict(torch.load(model_save_path + ".pth"))
+        model.to(self.DEVICE)
+        print("Saved model is loaded from:", model_save_path + ".pth")
+        return model
+
     def pre_train(self, epochs=10, train_loader=None, model_save_path=None):
         model = self.model
         # print(model_save_path)
@@ -316,9 +338,7 @@ class GradientFreeOptimization:
         import torch.nn as nn
 
         if os.path.exists(model_save_path + ".pth"):
-            self.model.load_state_dict(torch.load(model_save_path + ".pth"))
-            self.model.to(self.DEVICE)
-            print("Saved model is loaded from:", model_save_path + ".pth")
+            self.model = self.load_model_from_path(model_save_path)
             return self.model
 
         criterion = nn.CrossEntropyLoss()
@@ -370,10 +390,15 @@ class GradientFreeOptimization:
             # )
         import matplotlib.pyplot as plt
 
-        plt.plot(train_f1_history, label="train")
-        plt.plot(val_f1_history, label="val")
-        plt.ylabel("f1-score")
+        points = np.linspace(1, num_epochs, num=num_epochs)
+        plt.plot(points, train_f1_history, "o--", label="train")
+        # plt.scatter(x=points, y=train_f1_history)
+        plt.plot(points, val_f1_history, "^--", label="val")
+        # plt.scatter(x=points, y=train_f1_history)
         plt.xlabel("epoch")
+        plt.ylabel("f1 score")
+        plt.legend()
+        plt.grid()
         plt.savefig(model_save_path + ".png")
         plt.show()
         plt.close()

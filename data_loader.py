@@ -161,7 +161,10 @@ def load_cifar10_train_fixed_selection(num_samples=100, seed=42, batch_size=64):
 
     # Define the transformation to apply to the data
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
     )
 
     # Load the original MNIST dataset
@@ -197,7 +200,10 @@ def load_cifar10_train_each_step(
 ):
     # Define the transformation to apply to the data
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
     )
 
     # Load the original MNIST dataset
@@ -222,7 +228,10 @@ def load_cifar10_train_selection(num_samples=100, seed=42, batch_size=64, **args
 
     # Define the transformation to apply to the data
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
     )
 
     # Load the original MNIST dataset
@@ -245,7 +254,10 @@ def load_cifar10_train_selection(num_samples=100, seed=42, batch_size=64, **args
 def load_cifar10_train_full(batch_size=64):
     # Define the transformation to apply to the data
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
     )
 
     train_dataset = torchvision.datasets.CIFAR10(
@@ -267,7 +279,10 @@ def load_cifar10_train_full(batch_size=64):
 def load_cifar10_test(batch_size=64):
     # Define the transformation to apply to the data
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
     )
 
     test_dataset = torchvision.datasets.CIFAR10(
@@ -281,7 +296,7 @@ def load_cifar10_test(batch_size=64):
         batch_size=batch_size,
         shuffle=False,
         num_workers=0,
-        pin_memory=False,
+        pin_memory=True,
     )
     return test_loader
 
@@ -295,7 +310,10 @@ def load_cifar100_train_fixed_selection(num_samples=100, seed=42, batch_size=64)
 
     # Define the transformation to apply to the data
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
     )
 
     # Load the original MNIST dataset
@@ -317,7 +335,11 @@ def load_cifar100_train_fixed_selection(num_samples=100, seed=42, batch_size=64)
 
     # Create DataLoaders for the balanced datasets
     train_loader = DataLoader(
-        balanced_train_dataset, batch_size=batch_size, shuffle=False
+        balanced_train_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=True,
     )
     return train_loader
 
@@ -327,7 +349,10 @@ def load_cifar100_train_each_step(
 ):
     # Define the transformation to apply to the data
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
     )
 
     # Load the original MNIST dataset
@@ -352,7 +377,10 @@ def load_cifar100_train_selection(num_samples=100, seed=42, batch_size=64):
 
     # Define the transformation to apply to the data
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
     )
 
     # Load the original MNIST dataset
@@ -375,7 +403,10 @@ def load_cifar100_train_selection(num_samples=100, seed=42, batch_size=64):
 def load_cifar100_train_full(batch_size=64):
     # Define the transformation to apply to the data
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
     )
 
     train_dataset = torchvision.datasets.CIFAR100(
@@ -391,7 +422,10 @@ def load_cifar100_train_full(batch_size=64):
 def load_cifar100_test(batch_size=64):
     # Define the transformation to apply to the data
     transform = transforms.Compose(
-        [transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ]
     )
 
     test_dataset = torchvision.datasets.CIFAR100(
@@ -400,7 +434,9 @@ def load_cifar100_test(batch_size=64):
 
     # print("Size of balanced test dataset:", len(test_dataset))
 
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False, pin_memory=True
+    )
     return test_loader
 
 
