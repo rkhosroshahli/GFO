@@ -203,14 +203,14 @@ def main(args):
             #     seed=None,
             # )
 
-            sample_loader = data_fixed_sampler(
-                dataset=args.dataset.lower(),
-                batch_size=args.batch_size,
-                sample_size=args.sample_size,
-                seed=59,
-            )
+            # sample_loader = data_fixed_sampler(
+            #     dataset=args.dataset.lower(),
+            #     batch_size=args.batch_size,
+            #     sample_size=args.sample_size,
+            #     seed=59,
+            # )
 
-            gfo.data_loader = sample_loader
+            # gfo.data_loader = sample_loader
 
             best_solution = model_params
             best_fitness = gfo.evaluate_params(
@@ -281,13 +281,19 @@ def main(args):
             print("Local search is skipped.")
 
         if args.moo_algo == "nsga2" and args.moo_maxiter > 0:
-            sample_loader = data_fixed_sampler(
-                dataset=args.dataset.lower(),
-                batch_size=args.batch_size,
-                sample_size=args.sample_size,
-                seed=59,
-            )
-            gfo.data_loader = sample_loader
+            # sample_loader = data_fixed_sampler(
+            #     dataset=args.dataset.lower(),
+            #     batch_size=args.batch_size,
+            #     sample_size=args.sample_size,
+            #     seed=59,
+            # )
+            # sample_loader = data_random_each_step_sampler(
+            #     dataset=args.dataset.lower(),
+            #     batch_size=args.batch_size,
+            #     sample_size=args.sample_size,
+            #     seed=59,
+            # )
+            # gfo.data_loader = sample_loader
 
             gb_bs = model_params
             gb_f1 = gfo.evaluate_params(gb_bs, data_loader=sample_loader, metric="f1")
@@ -337,6 +343,15 @@ def main(args):
             algorithm = NSGA2(
                 pop_size=args.np, sampling=init_pop, eliminate_duplicates=False
             )
+
+            # sample_loader = data_random_each_step_sampler(
+            #     dataset=args.dataset.lower(),
+            #     batch_size=args.batch_size,
+            #     sample_size=args.sample_size,
+            #     max_num_call=args.np,
+            #     seed=59,
+            # )
+            # gfo.data_loader = sample_loader
 
             class MyOutput(Output):
                 def __init__(self):

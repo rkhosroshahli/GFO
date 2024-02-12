@@ -96,8 +96,8 @@ class GradientFreeOptimization:
                 out = nn.functional.softmax(output, dim=1)
                 _, pred = torch.max(out, dim=1)
 
-                true_labels.extend(label.tolist())
-                predicted_labels.extend(pred.tolist())
+                true_labels.extend(label.cpu().detach().numpy())
+                predicted_labels.extend(pred.cpu().detach().numpy())
 
         score = 0
         if self.metric == "f1":
@@ -127,7 +127,7 @@ class GradientFreeOptimization:
         class PercisionRecall(Problem):
             def __init__(self, n_var=1, gfo=None, block=None):
                 super().__init__(
-                    n_var=n_var, n_obj=2, n_ieq_constr=0, xl=-3.0, xu=3.0, vtype=float
+                    n_var=n_var, n_obj=2, n_ieq_constr=0, xl=-5.0, xu=5.0, vtype=float
                 )
                 self.gfo = gfo
                 self.block = block
@@ -146,12 +146,20 @@ class GradientFreeOptimization:
                 f2 = np.zeros(NP)
                 f3 = np.zeros(NP)
                 fn = np.zeros(NP)
+                # torch.cuda.reset_peak_memory_stats(device=self.gfo.DEVICE)
+                # print(
+                #     f"gpu used {torch.cuda.max_memory_allocated(device=self.gfo.DEVICE)} memory"
+                # )
                 for i in range(NP):
                     param = ux[i]
                     self.gfo.model.load_state_dict(
                         self.gfo.set_weights(self.gfo.model.state_dict(), param)
                     )
-                    self.gfo.model.to(self.gfo.DEVICE)
+                    # torch.cuda.reset_peak_memory_stats(device=self.gfo.DEVICE)
+                    # print(
+                    #     f"gpu used {torch.cuda.max_memory_allocated(device=self.gfo.DEVICE)} memory"
+                    # )
+                    # self.gfo.model.to(self.gfo.DEVICE)
                     self.gfo.model.eval()
 
                     # predicted_probs = []
@@ -167,13 +175,16 @@ class GradientFreeOptimization:
                             # running_loss += loss.item()
                             # out = nn.functional.softmax(output, dim=1)
                             # predicted_probs.extend(nn.functional.softmax(output, dim=1))
+                            output.detach()
                             _, pred = torch.max(output, dim=1)
 
-                            true_labels.extend(label.cpu().numpy())
-                            predicted_labels.extend(pred.cpu().numpy())
-                            del output
-                            del pred
-                            del _
+                            true_labels.extend(label.cpu().detach().numpy())
+                            predicted_labels.extend(pred.cpu().detach().numpy())
+                            # del output
+                            # del pred
+                            # del _
+                            # del data
+                            # del label
 
                     # Convert lists to numpy arrays
                     predictions = np.array(predicted_labels)
@@ -193,6 +204,11 @@ class GradientFreeOptimization:
                     f2[i] = recall
                     f3[i] = specifity
                     fn[i] = score
+
+                # torch.cuda.reset_peak_memory_stats(device=self.gfo.DEVICE)
+                # print(
+                #     f"gpu used {torch.cuda.max_memory_allocated(device=self.gfo.DEVICE)} memory"
+                # )
                 argbs = np.argmax(fn)
                 print(
                     f"Precision (f1)={f1[argbs]:.6f}, Recall (f2)={f2[argbs]:.6f}, Specifity={f3[argbs]:.6f}, F1-score={fn[argbs]:.6f}, Test F1-score={self.gfo.evaluate_params(ux[argbs], self.gfo.val_loader):.6f}"
@@ -221,7 +237,7 @@ class GradientFreeOptimization:
         # self.data_loader = data_loader
 
         model.load_state_dict(self.set_weights(model.state_dict(), parameters))
-        model.to(self.DEVICE)
+        # model.to(self.DEVICE)
         model.eval()
 
         if metric == None:
@@ -229,6 +245,8 @@ class GradientFreeOptimization:
 
         true_labels = []
         predicted_labels = []
+        # torch.cuda.reset_peak_memory_stats(device=self.DEVICE)
+        # print(f"gpu used {torch.cuda.max_memory_allocated(device=self.DEVICE)} memory")
 
         with torch.no_grad():
             for batch_idx, (data, label) in enumerate(data_loader):
@@ -237,14 +255,20 @@ class GradientFreeOptimization:
                 # loss = criterion(output, label)
                 # running_loss += loss.item()
                 # out = nn.functional.softmax(output, dim=1)
+                output.detach()
                 _, pred = torch.max(output, dim=1)
 
-                true_labels.extend(label.tolist())
-                predicted_labels.extend(pred.tolist())
+                true_labels.extend(label.cpu().detach().numpy())
+                predicted_labels.extend(pred.cpu().detach().numpy())
 
-                del output
-                del pred
-                del _
+                # del output
+                # del pred
+                # del _
+                # del data
+                # del label
+
+        # torch.cuda.reset_peak_memory_stats(device=self.DEVICE)
+        # print(f"gpu used {torch.cuda.max_memory_allocated(device=self.DEVICE)} memory")
 
         score = 0
         if metric == "f1":
@@ -372,8 +396,8 @@ class GradientFreeOptimization:
 
                 _, pred = torch.max(output.data, 1)
 
-                true_labels.extend(label.tolist())
-                predicted_labels.extend(pred.tolist())
+                true_labels.extend(label.cpu().detach().numpy())
+                predicted_labels.extend(pred.cpu().detach().numpy())
 
             train_loss = running_loss / len(train_loader)
             train_loss_history.append(train_loss)
@@ -414,4 +438,4 @@ class GradientFreeOptimization:
         torch.save(model.state_dict(), model_save_path + ".pth")
         # params = gfo.get_parameters(model)
         print("Model is saved to:", model_save_path + ".pth")
-        return model
+        return model()
