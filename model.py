@@ -5,9 +5,9 @@ import torch.nn as nn
 # Define a simple neural network class
 class ANN1H1D(nn.Module):
     def __init__(
-        self,
-        weights=None,
-        num_classes=10,
+            self,
+            weights=None,
+            num_classes=10,
     ):
         super(ANN2H1D, self).__init__()
         self.input_shape = 28 * 28 * 1
@@ -92,7 +92,7 @@ class LeNet5V1(nn.Module):
 class LeNet5(nn.Module):
     def __init__(self, weights=None, num_classes=10):
         super(LeNet5, self).__init__()
-        self.conv1 = nn.Conv2d(3, 6, kernel_size=5, stride=1, padding=2)
+        self.conv1 = nn.Conv2d(3, 6, kernel_size=5, stride=1, padding=0)
         self.act1 = nn.Tanh()
         self.pool1 = nn.AvgPool2d(kernel_size=2, stride=2)
 
@@ -100,7 +100,7 @@ class LeNet5(nn.Module):
         self.act2 = nn.Tanh()
         self.pool2 = nn.AvgPool2d(kernel_size=2, stride=2)
         self.flatten = nn.Flatten()
-        self.fc1 = nn.Linear(16 * 6 * 6, 120)
+        self.fc1 = nn.Linear(16 * 5 * 5, 120)
         self.act3 = nn.Tanh()
         self.fc2 = nn.Linear(120, 84)
         self.act4 = nn.Tanh()
@@ -119,24 +119,60 @@ class LeNet5(nn.Module):
 def model_loader(arch, dataset):
     model = None
     weights = None
-    if arch.lower() == "ann":
+    if arch == "ann":
         if dataset == "mnist":
             model = ANN1H1D
         elif dataset == "cifar10" or dataset == "cifar100":
             model = ANN1H3D
         else:
             model = ANN2H1D
-    elif arch.lower() == "resnet18":
+    elif arch == "resnet":
         from torchvision.models import resnet18
 
         model = resnet18
         weights = "DEFAULT"
-    elif arch.lower() == "vgg16":
+        # weights = None
+    elif arch == "vgg":
         from torchvision.models import vgg16
-
+        #
         model = vgg16
         weights = "DEFAULT"
-    elif arch.lower() == "lenet5":
+        # import timm
+        # print(timm.__version__)
+        # if dataset == "cifar10":
+        #     cfg = {
+        #         "num_classes": 10,
+        #         "input_size": [
+        #             3,
+        #             32,
+        #             32
+        #         ],
+        #         "pool_size": [
+        #             4,
+        #             4
+        #         ],
+        #         "crop_pct": 1,
+        #         "interpolation": "bilinear",
+        #         "fixed_input_size": False,
+        #         "mean": [
+        #             0.4914,
+        #             0.4822,
+        #             0.4465
+        #         ],
+        #         "std": [
+        #             0.2023,
+        #             0.1994,
+        #             0.201
+        #         ],
+        #         "first_conv": "features.0",
+        #         "classifier": "head.fc"
+        #     },
+        #     print("VGG16 cifar10")
+        #     model = timm.create_model("hf_hub:edadaltocg/vgg16_bn_cifar10", pretrained=True)
+        # if dataset == "cifar100":
+        # model = timm.create_model("hf_hub:edadaltocg/vgg16_bn_cifar100", pretrained=True)
+        # weights = "hugging_face"
+    elif arch == "lenet":
         if dataset == "mnist":
             model = LeNet5V1
         else:

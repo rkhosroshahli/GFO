@@ -1,577 +1,161 @@
-import os
 import argparse
-import warnings
-from matplotlib import pyplot as plt
+import os
+
 import numpy as np
 import torch
 
-from data_loader import *
-from model import model_loader
+from custom.callback import moo_callback
+from custom.display import moo_display
+from custom.selection import gfo_rankandcrowding
+from block import Block
+from data_loader import GFO_data
 from gfo import GradientFreeOptimization
-from block import *
-from block_differential_evolution import block_differential_evolution
-from cs import cs_3point
-from pymoo.algorithms.moo.nsga2 import NSGA2
-from pymoo.optimize import minimize
-from pymoo.util.display.output import Output
-from pymoo.util.display.column import Column
+from model import model_loader
+from optimizer_handler import handle_moo_optimizers
 
 
 def main(args):
-    DEVICE = "cuda:0" if torch.cuda.is_available() and args.cuda else "cpu"
+    DEVICE = args.device
+    if not torch.cuda.is_available() and args.device == 'gpu':
+        DEVICE = 'cpu'
     print("Running on device:", DEVICE.upper())
 
-    if not os.path.exists(args.dir):
-        os.makedirs(args.dir)
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
 
-    sample_loader, train_loader, test_loader, num_classes = data_loader(
-        args.dataset.lower(), args.batch_size, args.sample_size, seed=None
-    )
+    # Dataloader object
+    data = GFO_data(dataset=args.dataset, num_samples=args.sample_size)
+    # Model object
+    model, weights = model_loader(arch=args.model.lower(), dataset=args.dataset)
+
     model_save_path = f"output/models/{args.model}/{args.dataset}/{args.model}_{args.dataset}_epochs{args.epochs}_state_dict"
-    model, weights = model_loader(arch=args.model.lower(), dataset=args.dataset.upper())
+    # Gradient Free Optimization (gfo) object
+    gfo = GradientFreeOptimization(
+        network=model,
+        weights=weights,
+        data=data,
+        metric=args.metric,
+        DEVICE=DEVICE,
+        model_save_path=model_save_path,
+        dataset=args.dataset.lower(),
+        model_name=args.model.lower(),
+    )
+    if args.pre_train:
+        if not os.path.exists(f"output/models/{args.model}/{args.dataset}"):
+            os.makedirs(f"output/models/{args.model}/{args.dataset}")
+        gfo.pre_train(epochs=args.epochs,
+                      train_loader=data.train_loader,
+                      model_save_path=model_save_path)
+    model_params = gfo.get_parameters(gfo.model)
+    dims = len(model_params)
+    print("Total number of trainable params:", dims)
 
-    seeds = [
-        23,
-        97232445,
-        45689,
-        96793335,
-        12345679,
-        23,
-        97232445,
-        45689,
-        96793335,
-        12345679,
-    ]
-    for i in range(args.completed, args.runs):
-        seed_pop = seeds[i]
-        seed_block = seeds[i]
-        print(f"Run {i}: pop init seed: {seed_pop}, block seed: {seed_block}")
-
-        gfo = GradientFreeOptimization(
-            neural_network=model,
-            weights=weights,
-            num_classes=num_classes,
-            data_loader=sample_loader,
-            val_loader=test_loader,
-            metric=args.metric,
-            DEVICE=DEVICE,
-            model_save_path=model_save_path,
-        )
-
-        if args.pre_train:
-            print("Pre-train is enabled!")
-            gfo.pre_train(
-                epochs=args.epochs,
-                train_loader=train_loader,
-                model_save_path=model_save_path,
-            )
-        model_params = gfo.get_parameters(gfo.model)
-
-        # blocks_path = ""
-        shared_link = f"{args.dir}/{args.model}_{args.dataset}_{args.global_algo}_np{args.np}_{args.strategy}_maxFE{args.global_maxiter*args.np}"
-        global_save_link = f"{shared_link}_history_{i}"
-        global_plot_link = f"{shared_link}_plot_{i}"
-
+    # Block
+    block = None
+    if args.block:
+        block_path = None
+        if args.block_path:
+            block_path = args.block_path
+        else:
+            block_path = f"{args.model}_{args.dataset}_epochs{args.epochs}_{args.block_scheme.split('_')[0]}_maxD{args.max_dims}.pickle",
         block = Block(
             scheme=args.block_scheme,
-            dims=len(model_params),
-            block_size=args.block_size,
-            path=f"output/blocks/classic/{args.model}_{args.dataset}_epochs{args.epochs}_{args.block_scheme.split('_')[0]}_maxD{args.max_dims}.pickle",
+            gfo=gfo,
+            dims=dims,
+            block_file=block_path,
+            save_dir=f"output/blocks",
+            arch=args.model.lower(),
+            dataset=args.dataset.upper(),
+            num_blocks=args.num_blocks,
+            num_bins=args.bins,
         )
-        blocks_mask = None
-        blocked_dims = None
-        blocker = None
-        unblocker = None
-        if "optimized" in args.block_scheme:
-            blocks_mask = block.generator(
-                max_dims=args.max_dims,
-                gfo=gfo,
-                train_loader=train_loader,
-                test_loader=test_loader,
-                seed=seed_block,
-            )
-            blocker = block.blocker
-            unblocker = block.unblocker
-            if "merge" in args.block_scheme:
-                print("Merging blocks with size less than 2.")
-                new_path = f"output/blocks/merged/{args.model}_{args.dataset}_epochs{args.epochs}_{args.block_scheme}_maxD{args.max_dims}.pickle"
-                blocks_mask = block.merge_blocks(blocks_mask, new_path)
-        elif args.block_scheme == "randomized":
-            blocks_mask = block.generator(
-                gfo=gfo,
-                max_dims=args.max_dims,
-                block_size=args.block_size,
-                train_loader=train_loader,
-                test_loader=test_loader,
-                seed=seed_block,
-            )
-            blocker = block.blocker
-            unblocker = block.randomized_unblocker
+        block_model_params, = block.blocker(np.array([model_params.copy()]))
+        dims = len(block_model_params)
+        # print(dims)
 
-        blocked_dims = block.blocked_dims
+    optimizer_name = args.optimizer.upper()
+    if args.algorithm == "single":
+        shared_link = f"{args.dir}/{args.model}_{args.dataset}_{args.global_algo}_np{args.np}_{args.strategy}_maxFE{args.global_maxiter * args.np}"
+        global_save_link = f"{shared_link}_history_{args.run}"
+        global_plot_link = f"{shared_link}_plot_{args.run}"
+
+    elif args.algorithm == "multi":
 
         init_pop = None
-        init_pop_fitness = None
-        # if args.global_maxiter == 0 and args.local_maxiter > 0:
-        #     init_pop = gfo.random_population_init(popsize=args.np, seed=seed_pop)
-        #     init_pop = block.blocker(init_pop)
-        #     print("No global but local")
-        if args.global_algo != "":
-            if "optimized" in args.block_scheme:
-                init_pop = gfo.optimized_population_init(
-                    args.np, blocked_dims, blocks_mask, seed=seed_pop
-                )
-            elif args.block_scheme == "randomized":
-                init_pop = gfo.random_population_init(popsize=args.np, seed=seed_pop)
-            else:
-                init_pop = gfo.random_population_init(popsize=args.np, seed=seed_pop)
+        if args.init_pop == "random":
+            init_pop = gfo.random_population_init(dims=dims, pop_size=args.np)
+        if args.init_pop == "random+best":
+            init_pop = gfo.random_population_init(dims=dims, pop_size=args.np)
+            init_pop[0, :] = block_model_params.copy()
+        elif args.init_pop == "block":
+            init_pop = gfo.block_population_init(pop_size=args.np, block=block)
+        elif args.init_pop == "block+best":
+            init_pop = gfo.block_population_init(pop_size=args.np, block=block)
+            init_pop[0, :] = block_model_params.copy()
 
-            bounds = np.concatenate(
-                [
-                    init_pop.min(axis=0).reshape(-1, 1),
-                    init_pop.max(axis=0).reshape(-1, 1),
-                ],
-                axis=1,
-            )
-
-        best_solution = model_params
-        best_fitness = gfo.evaluate_params(
-            model_params, data_loader=train_loader, metric=args.metric
-        )
-        val_f1 = gfo.validation_func(best_solution)
-        print(
-            f"Adam, f(x)= {1 - best_fitness:.4f}, 1-f(x)= {(best_fitness):.4f}, g(x)={val_f1:.4f}",
-        )
-        best_fitness = 1 - best_fitness
-        fitness_history = [best_fitness]
-
-        nfe = 0
-        if args.global_algo == "DE" and args.global_maxiter > 0:
-
-            mutation_rate = None
-            if args.mutation == "vectorized":
-                mutation_rate = [
-                    np.array([0.1] * init_pop.shape[1]),
-                    np.array([1.0] * init_pop.shape[1]),
-                ]
-            elif args.mutation == "const":
-                mutation_rate = 0.5
-            elif args.mutation == "random":
-                mutation_rate = [[0.1], [1.0]]
-            else:
-                ValueError("Please enter a valid mutation rate initialization")
-
-            # nfe += args.np
-
-            res = block_differential_evolution(
-                gfo.fitness_func,
-                bounds,
-                mutation=mutation_rate,
-                maxiter=args.global_maxiter,
-                block_size=args.block_size,
-                blocked_dimensions=blocked_dims,
-                save_link=global_save_link,
-                plot_link=global_plot_link,
-                blocks_link=block.blocks_path,
-                popsize=args.np,
-                callback=None,
-                polish=False,
-                disp=True,
-                updating="deferred",
-                strategy=args.strategy,
-                init=init_pop,
-                val_func=gfo.validation_func,
-            )
-            best_solution = res.x
-            best_fitness = res.fun
-            nfe += res.nfev
-        else:
-            print("Global optimization is skipped.")
-
-        if args.local_algo == "cs3p" and args.local_maxiter > 0:
-            # sample_loader, _, _, _ = data_loader(
-            #     args.dataset.lower(),
-            #     args.batch_size,
-            #     args.sample_size,
-            #     max_num_call=1,
-            #     seed=None,
-            # )
-            # sample_loader = data_sampler(
-            #     dataset=args.dataset.lower(),
-            #     batch_size=args.batch_size,
-            #     max_num_call=2 * block.blocked_dims + 1,
-            #     seed=None,
-            # )
-
-            # sample_loader = data_fixed_sampler(
-            #     dataset=args.dataset.lower(),
-            #     batch_size=args.batch_size,
-            #     sample_size=args.sample_size,
-            #     seed=59,
-            # )
-
-            # gfo.data_loader = sample_loader
-
-            best_solution = model_params
-            best_fitness = gfo.evaluate_params(
-                best_solution, data_loader=sample_loader, metric=args.metric
-            )
-            val_f1 = gfo.validation_func(best_solution)
-            print(
-                f"Adam, f(x)= {1 - best_fitness:.4f}, 1-f(x)= {(best_fitness):.4f}, g(x)={val_f1:.4f}",
-            )
-            best_fitness = 1 - best_fitness
-            fitness_history = [best_fitness]
-
-            var_min = None
-            var_max = None
-            if init_pop == None:
-                if "optimized" in args.block_scheme:
-                    var_min, var_max = gfo.optimized_local_search_boundaries(
-                        blocked_dims, blocks_mask, seed=seed_pop
-                    )
-                # elif args.block_scheme == "randomized":
-                # init_pop = gfo.random_population_init(popsize=args.np, seed=seed_pop)
-                # else:
-                # init_pop = gfo.random_population_init(popsize=args.np, seed=seed_pop)
-            M = 10
-            if init_pop_fitness == None and init_pop != None:
-                if init_pop.shape[1] != len(model_params):
-                    init_pop_fitness = [
-                        gfo.fitness_func(p) for p in block.unblocker(init_pop)
-                    ]
-                    (best_blocked_solution,) = block.blocker(np.array([best_solution]))
-                    init_pop[0] = best_blocked_solution
-                    init_pop_fitness[0] = best_fitness
-                else:
-                    init_pop_fitness = [gfo.fitness_func(p) for p in (init_pop)]
-                    init_pop[0] = best_solution.copy()
-                    init_pop_fitness[0] = best_fitness
-
-                init_pop_fitness = np.asarray(init_pop_fitness)
-                fitness_history = [init_pop_fitness.min()]
-
-                var_min = np.min(init_pop[init_pop_fitness.argsort()[:M]], axis=0)
-                var_max = np.max(init_pop[init_pop_fitness.argsort()[:M]], axis=0)
-
-            shared_link = f"{args.dir}/{args.model}_{args.dataset}_{args.local_algo}_maxiter{args.local_maxiter}"
-            local_save_link = f"{shared_link}_history_{i}"
-            local_plot_link = f"{shared_link}_plot_{i}"
-
-            max_nfe = args.local_maxiter * (2 * block.blocked_dims + 1) + nfe
-            if args.max_nfe:
-                max_nfe = args.max_nfe
-
-            res = cs_3point(
-                fitness=gfo.fitness_func,
-                best_solution=best_solution,
-                best_fitness=best_fitness,
-                fitness_history=fitness_history,
-                var_min=var_min,
-                var_max=var_max,
-                nit=args.local_maxiter,
-                nfe=nfe,
-                max_nfe=max_nfe,
-                block=block,
-                plot_link=local_plot_link,
-                history_link=local_save_link,
-                validation_func=gfo.validation_func,
-            )
-        else:
-            print("Local search is skipped.")
-
-        if args.moo_algo == "nsga2" and args.moo_maxiter > 0:
-            # sample_loader = data_fixed_sampler(
-            #     dataset=args.dataset.lower(),
-            #     batch_size=args.batch_size,
-            #     sample_size=args.sample_size,
-            #     seed=59,
-            # )
-            # sample_loader = data_random_each_step_sampler(
-            #     dataset=args.dataset.lower(),
-            #     batch_size=args.batch_size,
-            #     sample_size=args.sample_size,
-            #     seed=59,
-            # )
-            # gfo.data_loader = sample_loader
-
-            gb_bs = model_params
-            gb_f1 = gfo.evaluate_params(gb_bs, data_loader=sample_loader, metric="f1")
-            gb_precision = gfo.evaluate_params(
-                gb_bs, data_loader=sample_loader, metric="precision"
-            )
-            gb_recall = gfo.evaluate_params(
-                gb_bs, data_loader=sample_loader, metric="recall"
-            )
-            gb_val_f1 = gfo.validation_func(gb_bs)
-            print(
-                f"Adam, Precision (f1)={gb_precision:.6f}, Recall (f2)={gb_recall:.6f}, F1-score={gb_f1:.6f}, Test F1-score={gb_val_f1:.6f}"
-            )
-
-            if block and len(best_solution) == block.dims:
-                (best_solution,) = block.blocker(np.array([model_params]))
-                dimensions = len(best_solution)
-
-                (ubs,) = block.unblocker(np.array([best_solution]))
-                gb_bs = ubs
-
-                gb_f1 = gfo.evaluate_params(
-                    gb_bs, data_loader=sample_loader, metric="f1"
-                )
-                gb_precision = gfo.evaluate_params(
-                    gb_bs, data_loader=sample_loader, metric="precision"
-                )
-                gb_recall = gfo.evaluate_params(
-                    gb_bs, data_loader=sample_loader, metric="recall"
-                )
-                gb_val_f1 = gfo.validation_func(gb_bs)
-                print(
-                    f"Adam Blocked, Precision (f1)={gb_precision:.6f}, Recall (f2)={gb_recall:.6f}, F1-score={gb_f1:.6f}, Test F1-score={gb_val_f1:.6f}"
-                )
-
-            if "optimized" in args.block_scheme:
-                init_pop = gfo.optimized_population_init(
-                    args.np, blocked_dims, blocks_mask, seed=seed_pop
-                )
-            elif args.block_scheme == "randomized":
-                init_pop = gfo.random_population_init(popsize=args.np, seed=seed_pop)
-
-            init_pop[0] = block.blocker(np.array([model_params]))
-
-            problem = gfo.moo_objective_func(dims=np.size(init_pop, 1), block=block)
-
-            algorithm = NSGA2(
-                pop_size=args.np, sampling=init_pop, eliminate_duplicates=False
-            )
-
-            # sample_loader = data_random_each_step_sampler(
-            #     dataset=args.dataset.lower(),
-            #     batch_size=args.batch_size,
-            #     sample_size=args.sample_size,
-            #     max_num_call=args.np,
-            #     seed=59,
-            # )
-            # gfo.data_loader = sample_loader
-
-            class MyOutput(Output):
-                def __init__(self):
-                    super().__init__()
-                    self.precision = Column("Precision", width=13)
-                    self.recall = Column("Recall", width=13)
-                    self.columns += [self.precision, self.recall]
-
-                def update(self, algorithm):
-                    super().update(algorithm)
-                    self.precision.set(np.mean(algorithm.pop.get("F")))
-                    self.recall.set(np.std(algorithm.pop.get("F")))
-
-            # Handle the warning
-            warnings.filterwarnings("ignore")
-            res = minimize(
-                problem,
-                algorithm,
-                ("n_gen", args.moo_maxiter),
-                seed=1,
-                verbose=True,
-                save_history=True,  # output=MyOutput(),
-            )
-
-            shared_link = f"{args.dir}/{args.model}_{args.dataset}_{args.moo_algo}_maxiter{args.moo_maxiter}"
-
-            moo_plot_link = f"{shared_link}_plot_{i}"
-
-            X, F = res.opt.get("X", "F")
-
-            n_evals = []  # corresponding number of function evaluations
-            hist_opt_F = []  # the objective space values in each generation
-            hist_pop_F = []  # the objective space values in each generation
-
-            for algo in res.history:
-                # store the number of function evaluations
-                n_evals.append(algo.evaluator.n_eval)
-                # retrieve the optimum from the algorithm
-                hist_opt_F.append(algo.opt.get("F"))
-                hist_pop_F.append(algo.pop.get("F"))
-
-            approx_ideal = F.min(axis=0)
-            approx_nadir = F.max(axis=0)
-
-            from pymoo.indicators.hv import Hypervolume
-
-            metric = Hypervolume(
-                ref_point=np.array([1.0, 1.0]),
-                norm_ref_point=False,
-                zero_to_one=True,
-                ideal=approx_ideal,
-                nadir=approx_nadir,
-            )
-
-            hv = [metric.do(_F) for _F in hist_opt_F]
-
-            plt.figure(figsize=(12, 5))
-            algo_label = f"{args.moo_algo}"
-            if args.block_scheme:
-                algo_label = "MHB" + algo_label
-            plt.plot(n_evals, hv, color="black", lw=0.7, label=algo_label)
-            plt.scatter(n_evals, hv, facecolor="none", edgecolor="black", marker="p")
-            # plt.title(shared_link)
-            plt.xlabel("FEs")
-            plt.ylabel("Hypervolume (HV)")
-            plt.legend()
-            plt.savefig(moo_plot_link + "_hv.png")
-            plt.show()
-
-            plt.figure(figsize=(12, 5))
-            plt.scatter(
-                1 - res.pop.get("F")[:, 0],
-                1 - res.pop.get("F")[:, 1],
-                # color="black",
-                label="Population",
-                facecolor="none",
-                edgecolor="black",
-                marker="s",
-                s=45,
-            )
-            plt.scatter(
-                1 - F[:, 0],
-                1 - F[:, 1],
-                color="red",
-                label="Pareto Front",
-                s=20,
-            )
-            plt.scatter(
-                gb_precision,
-                gb_recall,
-                color="blue",
-                label="Adam",
-                s=20,
-            )
-            # plt.title(shared_link)
-            plt.xlabel("Recall")
-            plt.ylabel("Precision")
-            plt.legend()
-            plt.savefig(moo_plot_link + "_paretofront.png")
-            plt.show()
-
-            # moo_save_link = f"{shared_link}_history_{i}"
-            np.savez(f"{shared_link}_pf_{i}", X=X, F=F)
-
-            import pickle
-
-            with open(f"{shared_link}_pop_history_{i}.pickle", "wb") as f:
-                pickle.dump(hist_pop_F, f)
-
-            with open(f"{shared_link}_pf_history_{i}.pickle", "wb") as f:
-                pickle.dump(hist_opt_F, f)
-
-            # import dill
-            # with open(moo_save_link, "wb") as f:
-            #     dill.dump(res.history, f)
+        handle_moo_optimizers(optimizer=optimizer_name, gfo=gfo, block=block, callback=moo_callback, display=moo_display,
+                              dimensions=dims, output_dir=args.output_dir,
+                              pop_size=args.np, sampling=init_pop, nfe=args.nfe, survival=gfo_rankandcrowding())
 
 
 if __name__ == "__main__":
-    # --------------------------------------------------
-    # SETUP INPUT PARSER
-    # --------------------------------------------------
     parser = argparse.ArgumentParser(description="Setup variables")
+    # Add arguments for algorithm selection
+    parser.add_argument('--algorithm', choices=['single', 'multi'], required=True,
+                        help="Select the type of optimization algorithm (single or multi).")
+    # Add argument for optimizer selection
+    parser.add_argument('--optimizer', choices=['DE', 'PSO', 'NSGA2', 'NSGA3'], required=True,
+                        help="Select the optimization algorithm.")
+    # Add argument for selecting deep neural network architecture
+    parser.add_argument('--model', choices=['resnet', 'vgg', 'alexnet', 'lenet'], required=True,
+                        help="Select the deep neural network architecture model.")
+    # Add argument for choosing dataset
+    parser.add_argument('--dataset', choices=['cifar10', 'cifar100', 'svhn', 'mnist'],
+                        help="Choose the dataset for training and evaluation.")
+    # Add arguments for training parameters
+    parser.add_argument('--pre_train', action='store_true', help="Use pre-trained")
+    parser.add_argument('--epochs', type=int, default=10,
+                        help="Number of epochs for training.")
+    # Add argument for specifying sample size
+    parser.add_argument('--sample_size', type=int, default=1000,
+                        help="Sample size for the optimization problem.")
+    # Add argument for specifying device (CPU or GPU) for CUDA
+    parser.add_argument('--device', choices=['cpu', 'cuda'], default='cuda',
+                        help="Specify device (CPU or GPU) for CUDA.")
+    # Add argument for evaluation metric
+    parser.add_argument('--metric', choices=['f1', 'top1', 'precision_recall'], default='f1',
+                        help="Select the evaluation metric (f1-score, top1, precision_recall).")
+    # Add arguments for EA algorithms
+    parser.add_argument('--np', type=int, default=100, help="Number of population")
+    parser.add_argument('--init_pop', type=str, default='random', choices=['random', 'block', 'random+best', 'block+best'])
 
-    # Neural Network model
-    parser.add_argument("--model", type=str, default="ANN", help="Model to use")
-    parser.add_argument(
-        "--pre-train",
-        type=bool,
-        default=False,
-        help="The model to be pre-trained or use random weights",
-    )
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=10,
-        help="Number of epochs the model to be trained/fine-tuned",
-    )
+    parser.add_argument('--nfe', type=int, default=1000000, help="Maximum number of function evaluation (nfe)")
 
-    # dataset
-    parser.add_argument(
-        "--dataset", type=str, default="MNIST", help="Dataset to be evlauated"
-    )
-    parser.add_argument(
-        "--batch-size", type=int, default=128, help="Batch size of data loader"
-    )
-    parser.add_argument(
-        "--sample-size", type=int, default=10000, help="Sample size of data loader"
-    )
-    parser.add_argument("--cuda", type=bool, default=True, help="Whether to use cuda")
+    parser.add_argument('--output_dir', type=str, default='output',
+                        help="Directory to save the output of optimization process.")
 
-    # grad-free training params
-    parser.add_argument("--runs", type=int, default=1, help="Number of runs")
-    parser.add_argument("--completed", type=int, default=0, help="Start run number")
-    parser.add_argument(
-        "--metric",
-        type=str,
-        default="f1",
-        help="Metric used in optimization [f1, top1, top5]",
-    )
+    # Add argument for specifying strategy for DE optimizer
+    parser.add_argument('--de_strategy',
+                        choices=['order1bin', 'rand1bin', 'best2bin', 'rand2bin', 'currenttobest1bin',
+                                 'randtobest1bin'],
+                        default='order1bin', help="Specify the strategy for Differential Evolution optimizer.")
+    # Add argument for specifying mutation type for DE optimizer
+    parser.add_argument('--de_mutation', choices=['constant', 'random', 'vectorized'],
+                        default='constant', help="Specify the mutation type for Differential Evolution optimizer.")
 
-    # algorithm
-    parser.add_argument(
-        "--global-algo", type=str, default="", help="Optimization methods"
-    )
+    # Add arguments for local search algorithm
+    parser.add_argument('--local_search', action='store_false', help="Use local search algorithm (Coordinate Search)")
+    parser.add_argument('--ls_iter', type=int, default=3, help="Number of local search iterations")
 
-    parser.add_argument(
-        "--strategy",
-        type=str,
-        default="rand1bin",
-        help="Mutation and Crossover strategy",
-    )
-    parser.add_argument(
-        "--mutation", type=str, default="const", help="Mutation and Crossover strategy"
-    )
+    # Add arguments for block related parameters
+    parser.add_argument('--block', action='store_false', help="Enable block")
+    parser.add_argument('--block_scheme', type=str, default='search', choices=['search', '1bin', 'random'],
+                        help="Specify the block scheme")
+    parser.add_argument('--bins', type=int, default=1000, help="Number of bins in histogram for Optimized Blocking")
+    parser.add_argument('--num_blocks', type=int, default=100, help="Number of blocks for Random Blocking")
+    parser.add_argument('--block_path', type=str, help='Path to the block file (pickle)')
 
-    parser.add_argument("--np", type=int, default=100, help="Number of population")
-
-    parser.add_argument(
-        "--global-maxiter", type=int, default=0, help="Max number of iterations"
-    )
-
-    parser.add_argument(
-        "--local-algo", type=str, default="", help="Optimization methods"
-    )
-
-    parser.add_argument(
-        "--local-maxiter", type=int, default=0, help="Max number of iterations"
-    )
-
-    parser.add_argument("--moo-algo", type=str, default="", help="Optimization methods")
-
-    parser.add_argument(
-        "--moo-maxiter", type=int, default=0, help="Max number of iterations"
-    )
-
-    parser.add_argument(
-        "--block-scheme", type=str, default="random", help="A hyper-paramater in BDE"
-    )
-
-    parser.add_argument(
-        "--block-size", type=int, default=10, help="Expected dimensions"
-    )
-    parser.add_argument(
-        "--max-dims", type=int, default=10000, help="Expected dimensions"
-    )
-
-    parser.add_argument(
-        "--max-nfe", type=int, default=100000, help="Expected dimensions"
-    )
-
-    # dir
-    parser.add_argument("--dir", type=str, default="./output/", help="Output directory")
-    # parser.add_argument('--model-dir', type=str, default='./models/', help='Save directory')
-    parser.add_argument(
-        "--other-info",
-        type=str,
-        default=None,
-        help="Output file middle name which contains setting",
-    )
+    parser.add_argument('--run', type=int, default=0, help="Run index")
 
     args = parser.parse_args()
-
     main(args)

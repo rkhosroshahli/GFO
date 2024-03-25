@@ -289,7 +289,7 @@ def main(args):
         print(f"Run {i}: pop init seed: {seed_pop}, block seed: {seed_block}")
 
         gfo = GradientFreeOptimization(
-            neural_network=model,
+            network=model,
             weights=weights,
             num_classes=num_classes,
             data_loader=sample_train_loader,
